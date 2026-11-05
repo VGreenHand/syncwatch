@@ -10,6 +10,9 @@ dist/*
 # ===== 本机工具链路径（含个人目录，不入库） =====
 local-env.bat
 
+# ===== 本地迭代工作区（含真实 IP / SSH / 待办，永不入库） =====
+private/
+
 # ===== Windows 客户端 =====
 # mpv 播放器体积 100MB+，不入库，用 windows/fetch-mpv.ps1 下载
 windows/mpv/
