@@ -1,9 +1,10 @@
 # 一起看 · SyncWatch
 
-> 2~5 人异地同步观看**各自本地已有**的视频文件：播放、暂停、拖动进度全同步，谁操作的会实时提示。
-> 视频数据完全不经过网络，服务器只转发几十字节的同步指令。
+> 2~5 人异地同步观看**各自本地已有**的视频：播放、暂停、拖动进度实时对齐，谁操作的会立刻提示。
+> **视频数据一字节都不上传**，服务器只转发几十字节的同步指令。
 
 <p>
+<a href="https://github.com/yangnicejin/syncwatch/actions/workflows/build.yml"><img alt="build" src="https://github.com/yangnicejin/syncwatch/actions/workflows/build.yml/badge.svg"></a>
 <img alt="server" src="https://img.shields.io/badge/server-Go%201.21-00ADD8">
 <img alt="windows" src="https://img.shields.io/badge/Windows-mpv%20IPC-0078D4">
 <img alt="android" src="https://img.shields.io/badge/Android-Kotlin%20%2B%20Media3-3DDC84">
@@ -12,76 +13,145 @@
 
 ---
 
-## 为什么不是"一起看视频网站"
+## 为什么不做成"在线一起看"
 
-常见的"同步观影"方案要把视频推给每个人，流量大、成本高，家庭宽带上行还容易被运营商判定为 PCDN。
-本项目反过来：**每人自己磁盘上已经有同一个片子**，只需要把"按了播放 / 暂停 / 拖到 12:34"这几条指令对齐。
+常见的同步观影方案要把视频推给每个人：流量大、成本高，家庭宽带上行还容易被运营商判定为 PCDN。
+
+本项目反过来做——**每个人磁盘上本来就有同一个片子**，网络只需要对齐"按了播放 / 暂停 / 拖到 12:34"这几条指令。
 
 | 特性 | 说明 |
 |------|------|
-| 零视频流量 | 网络上只有 JSON 信令，单房间 < 2 KB/s，月流量几百 MB |
-| 规避 PCDN 风险 | 架构上不存在"家庭宽带上行分发视频"的形态，家宽侧无视频流量特征 |
-| 全格式播放 | Windows 端用 mpv（ffmpeg 系），RMVB / MKV / HEVC / 外挂字幕都能放 |
-| 跨端互通 | Windows 与 Android 使用同一套协议，可混用同一房间 |
-| 服务端权威 | 房间状态由服务器持有，暂停竞态、进度漂移由服务器裁决 |
-| 成员状态 | 谁在线、谁在缓冲、谁暂停了，界面实时显示并归因 |
-| 5 人上限 | 一个房间最多 5 人，防滥用 |
+| 零视频流量 | 网络上只有 JSON 信令，单房间实测 < 2 KB/s；看一部两小时的片子，全房间总流量不到 1 MB |
+| 无 PCDN 风险 | 架构上不存在"家庭宽带上行分发视频"的形态，家宽侧没有视频流特征 |
+| 全格式播放 | Windows 用 mpv（ffmpeg 系），RMVB / MKV / HEVC / 外挂字幕都能放 |
+| 跨端互通 | Windows 与 Android 同一套协议，可以混在同一个房间里 |
+| 服务端权威 | 房间状态由服务器持有，暂停竞态、进度漂移由服务器裁决，不靠客户端互相同步 |
+| 成员可见 | 谁在线、谁在缓冲、谁暂停了，界面实时显示并标注是谁操作的 |
+| 极轻部署 | 1 核 1G 云主机足够，服务端是单文件 Go 程序，也能直接跑二进制不起 Docker |
 
 ## 架构
 
 ```
-        ┌──────────────────────────────────────────┐
-        │         ECS / 任意云主机（1 核 1G 够用）      │
-        │  ┌────────────────────────────────────┐  │
-        │  │  syncwatch-server (Go, 单二进制)      │  │
-        │  │  房间管理 · 权威状态机 · 防抖 · 漂移纠偏 │  │
-        │  └────────────────────────────────────┘  │
-        └───────▲───────────────────────▲──────────┘
+        ┌──────────────────────────────────────────────┐
+        │         ECS / 任意云主机（1 核 1G 够用）           │
+        │  ┌────────────────────────────────────────┐  │
+        │  │  syncwatch-server（Go，单二进制）        │  │
+        │  │  房间管理 · 权威状态机 · 防抖 · 漂移纠偏  │  │
+        │  └────────────────────────────────────────┘  │
+        └───────▲───────────────────────▲──────────────┘
                 │ ws:// 信令 < 2KB/s      │
         ┌───────┴────────┐      ┌────────┴─────────┐
-        │ Windows 客户端   │      │ Android 客户端     │
+        │ Windows 客户端   │      │ Android 客户端    │
         │ mpv + JSON IPC  │      │ Media3 ExoPlayer │
         └───────┬────────┘      └────────┬─────────┘
                 │                        │
           本地视频文件               本地视频文件
-        （不传输、不上传、不外发）
+        （不传输、不上传、不外发、不互传）
 ```
 
-## 快速开始
+**红线**：永远不要加入客户端之间传视频、或服务器分发文件的逻辑。那会让整个项目失去合规前提。
 
-### 1. 起一个服务端（3 分钟）
+## 三分钟上手
+
+### 0. 你需要准备
+
+- 一台有公网 IP 的服务器（云主机即可，Ubuntu / Debian 都行）
+- 参与的人各自持有**同一个版本**的视频文件（时长必须一致）
+- Windows 端无需安装任何东西（mpv 随包提供）；Android 7.0 以上
+
+### 1. 起服务端
+
+**方式 A：Docker（推荐）**
 
 ```bash
-git clone <你的仓库地址> && cd syncwatch/server
-cp .env.example .env          # 按需改端口；国内服务器记得用镜像源变量
+git clone https://github.com/yangnicejin/syncwatch.git
+cd syncwatch/server
+cp .env.example .env          # 国内服务器把镜像源换成 daocloud，见文件内注释
 docker compose up -d --build
-curl http://127.0.0.1:8995/health   # {"status":"ok","rooms":0}
+curl http://127.0.0.1:8995/health    # {"status":"ok","rooms":0}
 ```
 
-云服务器记得在**安全组放行对应 TCP 端口**，详细步骤（含备案、加固、升级、迁移）见 [docs/03-服务端部署.md](docs/03-服务端部署.md)。
+**方式 B：直接跑二进制**（不想装 Docker）
+
+```bash
+cd server && go build -o syncwatch-server . && PORT=8995 ./syncwatch-server
+```
+
+或者从 [Releases](https://github.com/yangnicejin/syncwatch/releases) 下载 `syncwatch-server-linux-amd64`，`chmod +x` 后直接运行，不需要 Go 环境。
+
+> **记得在云服务器安全组放行 TCP 8995**（或你自定义的端口）。没放行的话，客户端会一直重连。
+
+部署细节（镜像源、systemd 常驻、升级、迁移、限流加固）见 [docs/03-服务端部署.md](docs/03-服务端部署.md)。
 
 ### 2. Windows 端
 
+**最省事**：从 [Releases](https://github.com/yangnicejin/syncwatch/releases) 下载 `syncwatch-windows-portable.zip`（内含 mpv），解压后在 exe 同目录新建 `server.txt`，写一行 `你的IP:8995`，然后双击「启动观影.bat」。
+
+**自己编译**：
+
 ```bat
 cd windows
-fetch-mpv.ps1            :: 第一次：下载 mpv 到 windows\mpv\
-build.bat                :: 编译 syncwatch-win.exe（需要 Go 1.21+）
-echo 你的服务器IP:8995> server.txt
-启动观影.bat              :: 双击，按提示输入昵称、拖入视频、填房间码
+powershell -ExecutionPolicy Bypass -File fetch-mpv.ps1   :: 首次：下载 mpv 到 windows\mpv\
+echo 你的IP:8995 > server.txt
+build.bat                                                :: 需要 Go 1.21+，会把地址编进 exe
+打包.bat                                                  :: 可选：产出 dist\一起看-windows-v0.4.zip
 ```
 
-不装 Go 也可以直接从 Releases 下载打包好的 `一起看-windows-v0.4.zip`，解压双击即可。
+启动后是四步问答：
+
+```
+[1/4] 你的昵称              → 房间里显示的名字
+[2/4] 视频文件完整路径       → 直接把文件拖进窗口
+[3/4] 房间码                → 有朋友的码就填；直接回车 = 自己创建一个新房间
+[4/4] 房间密码              → 房间没设密码就直接回车
+```
+
+> 从源码自己编译时，`build.bat` 会读取 `server.txt` 并用 `-ldflags -X main.builtinServer=` 把地址**编译进 exe**，之后把 exe 单独发给别人也能直连。CI 产物故意不这么做——公开仓库里不该出现私人地址。
+
+也支持纯命令行参数，方便做快捷方式：
+
+| 参数 | 说明 |
+|------|------|
+| `-server host:port` | 服务器地址（默认 `server.txt` → `SYNCWATCH_SERVER` 环境变量 → 内置值） |
+| `-name 昵称` | 昵称，留空则交互输入 |
+| `-room 房间码` | 留空则由服务器创建新房间 |
+| `-password 密码` | 房间密码 |
+| `-file 路径` | 视频文件，留空则交互输入 |
+| `-mpv 路径` | 指定 mpv.exe（默认自动查找 `mpv\mpv.exe`，再退回 PATH） |
 
 ### 3. Android 端
+
+从 [Releases](https://github.com/yangnicejin/syncwatch/releases) 下载 `syncwatch-android-*.apk` 侧载安装（Android 7.0+，需要允许"安装未知来源应用"）。
+
+自己编译：
 
 ```bat
 cd android
 build-apk.bat            :: 产出 dist\一起看-android-v0.4.apk
 ```
 
-APK 传到手机侧载安装（Android 7.0+），或在 Releases 直接下载。详见 [docs/05-Android客户端.md](docs/05-Android客户端.md)。
+需要 JDK 17 + Android SDK（compileSdk 34）。构建脚本会自动处理中文路径问题（把工程复制到临时目录再编译），也支持用 `local.properties` 里的 `syncwatch.server` 把默认服务器地址写进 APK。
 
-> **同一部片**：所有人必须各自持有同一版本的视频文件（时长一致）。进房后成员列表会显示各自时长，不一致会立刻看得出来。
+界面流程：填服务器地址 → 填昵称 → 选视频 → 填房间码（留空则建房）→ 加入。房间码会显示在播放页顶部，点一下即可复制发给别人。
+
+### 4. 一起看（关键一步）
+
+**一个人建房，其他人填同一个房间码。** 这一步搞错就会"各看各的"：
+
+```
+你（房主）                          朋友
+启动 → 房间码直接回车               启动 → 房间码填 6ZJ46H
+  ↓                                  ↓
+控制台显示：已创建新房间 6ZJ46H  ──→  加入成功，双方成员列表互相可见
+（房间码已自动复制到剪贴板）
+```
+
+如果填了不存在的房间码，**服务器会新建一个房间**而不是报错——为了避免你误以为进了朋友的房间，两端都会明确提示：
+
+```
+[注意] 你输入的房间码 XXX 不存在或已解散，
+       所以新建了一个房间，并没有进到朋友的房间！
+```
 
 ## 目录结构
 
@@ -95,102 +165,186 @@ syncwatch/
 │   ├── 04-Windows客户端.md     使用与构建
 │   └── 05-Android客户端.md     使用与构建
 ├── server/                    ← Go WebSocket 信令服务器（全部逻辑在 main.go）
-│   ├── main.go
+│   ├── main.go                 房间管理、权威状态机、心跳、限流
 │   ├── Dockerfile
 │   ├── docker-compose.yml
-│   └── deploy.sh              一键部署到远程主机
-├── windows/                   ← Windows 客户端（Go + mpv IPC）
-│   ├── main.go
-│   ├── build.bat / 启动观影.bat / 打包.bat
-│   └── fetch-mpv.ps1
+│   ├── deploy.sh               一键部署到远程主机（rsync + docker compose）
+│   └── .env.example            端口、基础镜像、GOPROXY
+├── windows/                   ← Windows 客户端（Go + mpv JSON IPC）
+│   ├── main.go                 连接、同步逻辑、mpv 事件处理
+│   ├── ui.go                   控制台配色、房间码横幅、剪贴板、窗口标题
+│   ├── build.bat               编译（注入内置服务器地址）
+│   ├── 启动观影.bat             双击入口
+│   ├── 打包.bat                 产出可分发 zip
+│   └── fetch-mpv.ps1           下载便携 mpv
 ├── android/                   ← Android 客户端（Kotlin + Media3）
 │   └── app/src/main/java/com/syncwatch/app/
+│       ├── MainActivity.kt     界面与播放器
+│       ├── SyncEngine.kt       WebSocket 状态机、回声抑制、心跳
+│       └── Protocol.kt         消息构造
 ├── tools/                     ← 联调工具（不是产品代码）
-│   ├── sim/                   模拟多个成员进房，做协议回归测试
-│   └── ctl/                   对指定房间发送单条 play/pause/seek 指令
+│   ├── sim/                    模拟多个成员进房，做协议回归
+│   └── ctl/                    对指定房间发单条 play/pause/seek
 ├── dist/                      ← 构建产物（不入库）
-└── private/                   ← 本地迭代备忘（不入库：含服务器地址、待办、排障手册）
+└── .github/workflows/build.yml 打 tag 自动编译并发布 Release
 ```
 
-## 代码地图
+## 同步是怎么做到的
 
-想改东西时按这张表找位置：
+服务端只维护**一个**房间级状态：`state`（playing / paused）、`position`（锚点时刻的进度）、`anchor`（锚点时间戳）、`rate`（倍速）。任意时刻的权威进度是：
 
-| 我想改… | 去哪 |
-|---------|------|
-| 人数上限 / 纠偏阈值 / 防抖窗口 / 心跳超时 | `server/main.go` 顶部 `const` 块 |
-| 房间码规则、密码校验、重名规则 | `server/main.go` `handleJoin()` |
-| 房间内状态机（播放/暂停/seek/心跳） | `server/main.go` `readLoop()` 的 switch |
-| 协议字段 | `server/main.go` `Msg` 结构体 + 两端 `Msg`/`Protocol`（三处要同步改） |
-| Windows 播放器行为（mpv 命令） | `windows/main.go` `handlePropertyChange()` / `applySync()` |
-| Android 播放器行为 | `android/.../SyncEngine.kt` + `Protocol.kt` |
-| 界面布局 | `android/app/src/main/res/layout/activity_main.xml` |
-| 服务器地址默认值 | `windows/server.txt`、`android/local.properties`（都不入库） |
+```
+current = position + (now - anchor) * rate      // 仅在 playing 时累加
+```
+
+客户端每 5 秒上报一次心跳位置，服务端据此判断漂移：
+
+| 偏差 | 动作 |
+|------|------|
+| < 0.3 s | 忽略，不做任何处理 |
+| 0.3 ~ 1 s | 记录，不打断播放 |
+| > 1 s，且连续两次 | 只给**漂移的那个人**发 `forceSeek` |
+
+几个关键取舍，都是踩过坑才定下来的：
+
+- **不回显给发起者**：谁按的播放，谁本地已经执行了，服务器只广播给其他人。否则会形成 A→B→A 的回声。
+- **seek 防抖 120ms**：拖动进度条会连发几十条事件，只广播最后一次。
+- **收到 `hello` 前不上报本地事件**：mpv 启动瞬间的初始暂停会误广播，把别人的播放打断。
+- **空房间保留 15 分钟**：手机切后台、WiFi 抖动导致的断线重连，回来时房间和进度都还在。
+- **限制人数 5 人**：防滥用，也够家庭/朋友场景。
+
+完整协议（消息格式、状态机、加入流程）见 [docs/02-同步协议.md](docs/02-同步协议.md)。
+
+## 协议速查
+
+传输层是明文 `ws://host:port/ws` 上的 UTF-8 JSON 文本帧，单条上限 8 KB，每连接限流 40 条/秒。
+
+| 方向 | type | 载荷 | 说明 |
+|------|------|------|------|
+| C→S | `join` | `room`(空=建房), `name`, `password` | 必须是首条消息 |
+| C→S | `play` / `pause` | `position`, `rate?` | 请求播放 / 暂停 |
+| C→S | `seek` | `position` | 请求跳转 |
+| C→S | `heartbeat` | `position`, `rate` | 每 5 秒，用于漂移检测 |
+| C→S | `memberState` | `state` | 上报自己的播放器状态（含 buffering） |
+| C→S | `fileInfo` | `file`, `size`, `duration` | 上报片源信息，用于一致性提示 |
+| S→C | `hello` | 全量状态 + `created` | 加入成功；`created=true` 表示新建了房间 |
+| S→C | `sync` | `state`, `position`, `anchorMs`, `rate`, `operator` | 状态变更广播（不回显发起者） |
+| S→C | `forceSeek` | `position`, `operator` | 漂移纠偏，`operator` 固定为 `server(drift)` |
+| S→C | `members` / `join` / `leave` | 成员信息 | 成员变化 |
+| S→C | `joinError` / `error` | `error` | 加入失败（随后断开）/ 非致命错误 |
+
+改协议必须**四处同步改**：`server/main.go`、`windows/main.go`、`android/.../Protocol.kt`、`docs/02-同步协议.md`。漏一处不会报错，只会"没反应"——这是最难查的一类问题。
 
 ## 配置项
 
 | 位置 | 作用 | 是否入库 |
 |------|------|----------|
-| `local-env.bat` | 本机 Go / JDK / Android SDK / Gradle 路径，构建脚本自动读取 | 否（有 `local-env.bat.example`） |
-| `server/.env` | 端口、镜像源、GOPROXY | 否（有 `.env.example`） |
-| `server/deploy.env` | 部署目标的 host/port/user | 否（有示例） |
-| `windows/server.txt` | Windows 客户端默认服务器地址（一行 `host:port`） | 否 |
+| `server/.env` | 端口、基础镜像、GOPROXY | 否（有 `.env.example`） |
+| `server/deploy.env` | 部署目标的 host / port / user | 否（有 `.example`） |
+| `windows/server.txt` | Windows 默认服务器地址（一行 `host:port`） | 否 |
 | `windows/mpv/` | mpv 播放器（100MB+） | 否，`fetch-mpv.ps1` 下载 |
 | `android/local.properties` | `sdk.dir` 与 `syncwatch.server` | 否（有 `.example`） |
-| 环境变量 `SYNCWATCH_SERVER` | 覆盖客户端服务器地址（调试用） | — |
+| `local-env.bat` | 本机 Go / JDK / SDK 路径，构建脚本自动读取 | 否（有 `.example`） |
+| `SYNCWATCH_SERVER` 环境变量 | 临时覆盖客户端服务器地址（调试用） | — |
 
-## 技术栈与版本
+## 技术栈
 
 | 组件 | 版本 | 备注 |
 |------|------|------|
 | Go | 1.21+ | 服务端与 Windows 客户端共用 |
-| gorilla/websocket | v1.5.3 | WebSocket |
+| gorilla/websocket | v1.5.3 | WebSocket 实现 |
 | Docker | 20+ / compose v2 | 服务端部署 |
-| JDK | 17 | 构建 Android |
-| Gradle | 8.7 | 构建 Android |
+| JDK / Gradle | 17 / 8.7 | 构建 Android |
 | Android SDK | compileSdk 34 / minSdk 24 | Android 7.0+ |
 | Kotlin | 1.9.24 | |
 | Media3 | 1.3.1 | ExoPlayer |
-| mpv | 任意较新版本 | Windows 播放内核 |
+| mpv | 任意较新版本 | Windows 播放内核，`fetch-mpv.ps1` 自动取最新 |
+
+## 构建与发布
+
+```bat
+windows\build.bat        :: 编译 exe（注入 server.txt 里的地址）
+windows\打包.bat          :: 产出 dist\一起看-windows-v0.4.zip（含 mpv）
+android\build-apk.bat    :: 产出 dist\一起看-android-v0.4.apk
+server\deploy.sh         :: rsync 到远程主机并 docker compose up
+```
+
+**打 tag 会自动发布**：推 `v0.4` 这类 tag 后，GitHub Actions 会编译服务端（amd64 / arm64）、Windows 客户端、Android APK，组装免安装包，并在 Releases 页面创建对应版本。
+
+发版时版本号要改 4 处，否则会出现"关于里显示 v0.3、包名却是 v0.4"：
+
+1. `android/app/build.gradle` 的 `versionCode` / `versionName`
+2. `android/build-apk.bat` 的 `set "VER="`
+3. `windows/打包.bat` 的 zip 文件名
+4. `windows/ui.go` 的 `const AppVersion`
+
+外加 `server/main.go` 根路径返回的版本串。
 
 ## 联调与测试
 
 ```bash
-# 服务器上跑两个模拟成员，验证广播与防抖
+# 起一个本地服务端
+cd server && PORT=8995 go run .
+
+# 两个模拟成员进同一个房间，观察广播与防抖
 cd tools/sim && go run . -room TEST01
 
-# 向房间发一条指令，观察客户端反应
-cd tools/ctl && go run . -room TEST01 -name remote -cmd play -pos 30
+# 向房间发单条指令，观察客户端反应
+cd tools/ctl && go run . -room TEST01 -name remote -cmd seek -pos 300
 ```
 
-`tools/` 里两个小程序是协议层的"遥控器"，改完服务端拿它们回归最快，不用开播放器。
+`tools/` 里这两个小程序是协议层的"遥控器"，改完服务端拿它们回归最快，不用开播放器。
+
+Android 调试构建还留了一个自动化入口（仅 `BuildConfig.DEBUG` 生效，正式包不会执行），可以跳过系统文件选择器直接进房：
+
+```bash
+adb shell am start -n com.syncwatch.app/.MainActivity \
+  --es video test.mp4 --es server 127.0.0.1:8995 \
+  --es name Tablet --es room TEST01 --ez autojoin true --ez autoplay true
+```
 
 ## 常见问题
 
 <details>
 <summary><b>两个人不在同一个房间，各看各的</b></summary>
 
-最常见原因：**两个人都直接回车**，于是各自创建了一个房间。正确流程是——一个人先创建，把控制台醒目打印的 6 位房间码（已自动复制到剪贴板）发给另一个人，后者启动时填进「房间码」这一步。
+最常见原因：**两个人都直接回车**，于是各自创建了一个房间。正确流程是——一个人先创建，把控制台醒目打印的 6 位房间码（已自动复制到剪贴板）发给另一个人，后者在「房间码」这一步填进去。
 
-如果看到红字「你输入的房间码 XXX 不存在或已解散」，说明那个房间已解散或码打错了，你其实新建了一个空房间。核对后重启即可。Android 端同理，房间码显示在播放页顶部，点一下可复制。
+如果看到红字「你输入的房间码 XXX 不存在或已解散」，说明码打错了或房间已过期，你其实新建了一个空房。核对后重启即可。Android 端同理，房间码显示在播放页顶部，点一下可复制。
+</details>
+
+<details>
+<summary><b>拖进度条之后，两边跳回片头</b></summary>
+
+已修复（v0.4）。根因是 mpv 的 `seek` 事件在跳转完成**之前**就发出，事件里带的位置还是旧值 0，被当成用户操作上报，服务器照单全收就把房间位置改成 0。现在改为等 `seeking` 属性变 false 后再读真实位置。
+
+如果你还遇到，先确认两端都是 v0.4 及以上；仍有问题就开日志看 Windows 控制台有没有 `你跳转到了 0.0s`。
+</details>
+
+<details>
+<summary><b>远端点了播放，Windows 卡在暂停不动</b></summary>
+
+已修复（v0.4）。根因是 `mpv` 的 `pause` 是布尔值，代码却用读浮点数的方式去解析，失败后静默返回 0，于是 Windows 永远认为自己"没在暂停"，"播放"分支从不执行。
+
+同样是升级到 v0.4 即可。升级后若仍有问题，检查 mpv 是否被别的进程占用（Windows 端一台机器只能跑一个实例）。
 </details>
 
 <details>
 <summary><b>两个人画面越看越歪</b></summary>
 
-先确认片源时长是否一致（成员列表会显示）。若时长一致仍在漂移，说明客户端解码速度差异，服务器会在偏差 > 1s 时强制纠偏，检查日志里有没有 `forceSeek`。
+先确认片源时长是否一致（成员列表会显示各自时长）。若时长一致仍在漂移，说明解码速度有差异，服务器会在偏差 > 1 秒且连续两次时强制纠偏，日志里能看到 `forceSeek`。偶尔一次纠偏是正常的，频繁纠偏通常是片源版本不同。
 </details>
 
 <details>
-<summary><b>连不上服务器 / 一直重连</b></summary>
+<summary><b>连不上服务器 / 一直在重连</b></summary>
 
-按顺序排查：① 安全组是否放行端口 ② 服务器 `docker ps` 容器是否 Up ③ `curl http://IP:端口/health` 是否有响应 ④ 客户端 `server.txt` 地址是否含多余空格。
+按顺序排查：① 安全组是否放行端口 ② 服务器上 `docker ps` 容器是否 Up ③ `curl http://IP:端口/health` 是否有响应 ④ 客户端 `server.txt` 是否含多余空格或换行 ⑤ 客户端填的是不是公网 IP（不是 `127.0.0.1`，那是服务器自己）。
 </details>
 
 <details>
 <summary><b>Windows 提示找不到 mpv</b></summary>
 
-`windows/mpv/mpv.exe` 不存在。跑 `windows/fetch-mpv.ps1`，或手动把 mpv 解压到 `windows/mpv/`，也可用 `-mpv "C:\path\mpv.exe"` 指定。
+`windows/mpv/mpv.exe` 不存在。跑 `windows/fetch-mpv.ps1` 自动下载，或手动把 mpv 解压到 `windows/mpv/`，也可以用 `-mpv "C:\path\mpv.exe"` 指定。
 </details>
 
 <details>
@@ -202,24 +356,26 @@ cd tools/ctl && go run . -room TEST01 -name remote -cmd play -pos 30
 <details>
 <summary><b>会被运营商判定 PCDN 吗</b></summary>
 
-本架构不产生任何家庭宽带上行视频流量，只有几十字节的同步指令。**红线：永远不要加客户端间 P2P 传视频的功能**，详见 [docs/01-方案设计.md](docs/01-方案设计.md) 第二章。
+本架构不产生任何家庭宽带上行视频流量，只有几十字节的同步指令，家宽侧没有视频分发特征。**红线：永远不要加客户端间 P2P 传视频的功能**，详见 [docs/01-方案设计.md](docs/01-方案设计.md) 第二章。
 </details>
 
 ## 已知限制
 
 - Windows 端一台机器只能跑一个实例（mpv 命名管道被占用）
-- Android 端切后台会暂停（未做前台 Service，观影场景本身需要亮屏）
+- Android 切后台会暂停（未做前台 Service；观影场景本身需要亮屏）
 - 不做视频分发，所有人须自备同一片源
-- 服务端无持久化，房间随进程内存存在（重启即清空，符合使用场景）
+- 服务端无持久化：房间存在内存里，进程重启即清空；空房间 15 分钟后回收
+- 明文 `ws://`，无加密。信令里只有进度和昵称，不含任何隐私内容；需要更高安全性可以自行套 TLS 换成 `wss://`，协议不用改
 
-## Roadmap
+## 版本演进
 
-- [x] v0.2 Windows 进房入口（此前只能靠命令行 `-room`）、房间码彩色横幅 + 自动复制、双端「房间不存在」提示、Android 界面改版与输入框可读性修复
-- [x] v0.3 修同步关键缺陷：对端回音被误报成"跳片头"、房间跨断线保留、漂移只纠正本人、Android 缓冲被误判成暂停
-- [x] v0.4 双端实机联调修同步：mpv 布尔属性解析错误导致"远端放音本端不动"、seek 事件取错位置导致跳片头、成员状态实时上报
-- [ ] v0.5 房主踢人、房间锁、Android 前台 Service（后台不掉线）
-- [ ] v0.6 语音/文字聊天（纯信令，成本极低）
-- [ ] v1.0 一体化安装包、自动更新
+- `v0.1` 服务端 + Windows + Android 三端跑通，协议联调与端到端冒烟测试
+- `v0.2` Windows 加入房间入口（此前只能靠命令行 `-room`，双击启动必然各建各的房间）；房间码彩色横幅 + 自动复制；双端「房间不存在」提示；Android 界面改版、修复输入框白字压浅底
+- `v0.3` 房间跨断线保留（15 分钟）；漂移纠偏只发给漂移者；Android 缓冲状态不再被误判成暂停；服务端位置参数校验
+- `v0.4` 双端实机联调：修复 mpv 布尔属性解析错误导致的"远端放音本端不动"、seek 事件取错位置导致的"跳回片头"；成员状态实时上报；纠偏阈值分档
+- `v0.5`（计划）房主踢人、房间锁、Android 前台 Service
+- `v0.6`（计划）语音 / 文字聊天（纯信令，成本极低）
+- `v1.0`（计划）一体化安装包、自动更新
 
 ## 许可与免责
 

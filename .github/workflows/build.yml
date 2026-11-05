@@ -1,11 +1,19 @@
 name: build
 
-# 打 tag（如 v0.2）或手动触发时，编译服务端、Windows 客户端与 Android APK 并上传产物。
-# Windows 产物不内置服务器地址（构建时不传 -X main.builtinServer），符合"仓库不含私人地址"的约定。
+# 打 tag（如 v0.4）或手动触发时：
+#   - 编译服务端（amd64 / arm64）、Windows 客户端、Android APK
+#   - Windows 额外组装「免安装包」（exe + 启动脚本 + 使用说明 + mpv）
+#   - 打 tag 时自动创建 Release 并附上全部产物
+#
+# 注意：CI 产物**不内置服务器地址**（构建时不传 -X main.builtinServer），
+# 下载者需自己在 exe 同目录放 server.txt。这是「仓库不含私人地址」约定的配套措施。
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+
+permissions:
+  contents: write # release job 需要创建 Release
 
 jobs:
   server:
@@ -47,10 +55,39 @@ jobs:
         run: |
           $env:CGO_ENABLED = "0"
           go build -trimpath -ldflags="-s -w" -o ../dist/syncwatch-win.exe .
+
+      # mpv 约 100MB，拉取失败不应让整个 job 变红：
+      # 退化成「只发裸 exe」，用户按 README 自己跑 fetch-mpv.ps1 也能用。
+      - name: 下载 mpv（失败则只发布裸 exe）
+        id: mpv
+        continue-on-error: true
+        working-directory: windows
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File fetch-mpv.ps1
+
+      - name: 组装免安装包
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP "pkg"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item "dist/syncwatch-win.exe" $stage
+          Copy-Item "windows/启动观影.bat" $stage
+          Copy-Item "windows/使用说明.txt" $stage
+          if (Test-Path "windows/mpv/mpv.exe") {
+            Copy-Item "windows/mpv" $stage -Recurse
+            Compress-Archive -Path "$stage\*" -DestinationPath "dist/syncwatch-windows-portable.zip" -Force
+            Write-Host "已生成免安装包（含 mpv）"
+          } else {
+            Write-Host "未取得 mpv，仅提供裸 exe"
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: syncwatch-windows
-          path: dist/syncwatch-win.exe
+          path: |
+            dist/syncwatch-win.exe
+            dist/syncwatch-windows-portable.zip
+          if-no-files-found: warn
 
   android:
     name: Android APK
@@ -64,8 +101,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      # 不再用 android-actions/setup-android：它调用的 sdkmanager 与当前 runner 镜像
-      # 不兼容（Failed to find package 'tools'），而 ubuntu-latest 本来就预装了 Android SDK。
+      # 不用 android-actions/setup-android：它调用的 sdkmanager 与当前 runner 镜像
+      # 不兼容（Failed to find package 'tools'），而 ubuntu-latest 本来就预装了 SDK。
       - name: 使用 runner 预装的 Android SDK
         run: |
           SDK="${ANDROID_SDK_ROOT:-}"
@@ -73,7 +110,6 @@ jobs:
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "sdk.dir=$SDK" > local.properties
           echo "使用 SDK: $SDK"
-          ls "$SDK/platforms" 2>/dev/null || true
       - name: 补齐 SDK 34 组件（已存在则跳过）
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
@@ -82,7 +118,6 @@ jobs:
           if [ -n "$SM" ]; then
             yes | "$SM" --licenses > /dev/null 2>&1 || true
             "$SM" "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
-            echo "SDK 组件就绪"
           fi
       - name: Build debug APK
         run: |
@@ -92,3 +127,41 @@ jobs:
         with:
           name: syncwatch-android
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  release:
+    name: 发布 Release
+    needs: [server, windows, android]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 整理产物
+        run: |
+          mkdir -p out
+          TAG="${{ github.ref_name }}"
+          for f in $(find artifacts -type f); do
+            base=$(basename "$f")
+            case "$base" in
+              app-debug.apk) cp "$f" "out/syncwatch-android-${TAG}.apk" ;;
+              *)             cp "$f" "out/$base" ;;
+            esac
+          done
+          ls -lh out
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          body: |
+            一起看 · SyncWatch ${{ github.ref_name }}
+
+            **下载哪个**
+            - `syncwatch-windows-portable.zip` —— Windows 免安装包，解压双击「启动观影.bat」
+            - `syncwatch-win.exe` —— 只要程序本体（需自备 mpv）
+            - `syncwatch-android-*.apk` —— 安卓安装包，Android 7.0+
+            - `syncwatch-server-linux-*` —— 服务端单二进制（无 Docker 时直接用）
+
+            **重要：这些包不含服务器地址。**
+            首次运行前，在 exe 同目录建 `server.txt`，写入一行 `你的IP:8995`；
+            安卓端在应用表单里填服务器地址即可。
