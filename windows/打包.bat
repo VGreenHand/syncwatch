@@ -35,6 +35,7 @@ mkdir "%STAGE%"
 copy /y "syncwatch-win.exe" "%STAGE%" >nul
 copy /y "启动观影.bat" "%STAGE%" >nul
 copy /y "使用说明.txt" "%STAGE%" >nul
+if exist "server.txt" (copy /y "server.txt" "%STAGE%" >nul) else (echo 警告：未找到 server.txt，分发包将使用内置地址)
 xcopy "mpv" "%STAGE%\mpv\" /E /I /Y /Q >nul
 
 echo [2/2] 压缩...

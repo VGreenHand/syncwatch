@@ -31,12 +31,17 @@ exit /b 1
 :build_go
 echo [构建] 使用本机 Go 编译...
 go version
+rem ---- 从 server.txt 读取服务器地址，编译进 exe 作为内置默认值 ----
+set "DEFSRV="
+if exist "server.txt" for /f "usebackq delims=" %%i in ("server.txt") do if not defined DEFSRV set "DEFSRV=%%i"
+if not defined DEFSRV set "DEFSRV=127.0.0.1:8995"
+echo [构建] 内置服务器地址: %DEFSRV%
 set "GOOS=windows"
 set "GOARCH=amd64"
 set "CGO_ENABLED=0"
 go mod tidy
 if errorlevel 1 goto fail
-go build -trimpath -ldflags="-s -w" -o "%OUT%" .
+go build -trimpath -ldflags="-s -w -X main.builtinServer=%DEFSRV%" -o "%OUT%" .
 if errorlevel 1 goto fail
 goto ok
 
@@ -44,7 +49,7 @@ goto ok
 echo [构建] 本机无 Go，改用 Docker 交叉编译...
 docker run --rm -v "%cd%":/src -w /src ^
   -e GOPROXY=%GOPROXY% -e GOOS=windows -e GOARCH=amd64 -e CGO_ENABLED=0 ^
-  golang:1.22-alpine sh -c "go mod tidy && go build -trimpath -ldflags='-s -w' -o %OUT% ."
+  golang:1.22-alpine sh -c "go mod tidy && go build -trimpath -ldflags='-s -w -X main.builtinServer=%DEFSRV%' -o %OUT% ."
 if errorlevel 1 goto fail
 goto ok
 

@@ -401,10 +401,18 @@ var (
 	mpvFlag    = flag.String("mpv", "", "mpv.exe 路径（默认自动寻找）")
 )
 
+// builtinServer 是编译期可注入的内置默认地址：
+//
+//	go build -ldflags "-X main.builtinServer=1.2.3.4:8995"
+//
+// build.bat 会自动读取 server.txt 注入，因此分发给别人的 exe 即使没有
+// server.txt 也能直连你的服务器。
+var builtinServer = "127.0.0.1:8995"
+
 // defaultServerAddr 决定默认服务器地址，优先级：
 //  1. 环境变量 SYNCWATCH_SERVER
 //  2. 程序同目录的 server.txt（一行 host:port）
-//  3. 内置回环地址
+//  3. 编译期内置地址（默认是自己服务器；未注入时为回环地址）
 //
 // 这样换服务器不用改代码重新编译，改 server.txt 即可（该文件不纳入 git）。
 func defaultServerAddr() string {
@@ -419,7 +427,7 @@ func defaultServerAddr() string {
 			}
 		}
 	}
-	return "127.0.0.1:8995"
+	return builtinServer
 }
 
 func serverURL() string {
