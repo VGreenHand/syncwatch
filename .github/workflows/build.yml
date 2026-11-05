@@ -1,0 +1,76 @@
+name: build
+
+# 打 tag（如 v0.1）或手动触发时，编译服务端与 Windows 客户端并上传产物。
+# Android 需要 Android SDK，建议本地用 android/build-apk.bat 构建，见 docs/05。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  server:
+    name: 服务端 linux/${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: server/go.sum
+      - name: Build
+        working-directory: server
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+        run: go build -trimpath -ldflags="-s -w" -o ../dist/syncwatch-server-linux-${{ matrix.arch }} .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: syncwatch-server-linux-${{ matrix.arch }}
+          path: dist/syncwatch-server-linux-${{ matrix.arch }}
+
+  windows:
+    name: Windows 客户端
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: windows/go.sum
+      - name: Build
+        working-directory: windows
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags="-s -w" -o ../dist/syncwatch-win.exe .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: syncwatch-windows
+          path: dist/syncwatch-win.exe
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Build debug APK
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --console=plain
+      - uses: actions/upload-artifact@v4
+        with:
+          name: syncwatch-android
+          path: android/app/build/outputs/apk/debug/app-debug.apk

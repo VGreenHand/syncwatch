@@ -1,0 +1,23 @@
+@echo off
+rem ============================================================
+rem  Local toolchain paths (SAMPLE)
+rem
+rem  Usage: copy this file to local-env.bat and edit the paths.
+rem  local-env.bat is gitignored, so your personal paths stay local.
+rem  Read by: windows\build.bat and android\build-apk.bat
+rem
+rem  NOTE: keep remarks ASCII-only. cmd mis-parses non-ASCII rem
+rem  lines under some code pages (GBK/UTF-8 mismatch).
+rem ============================================================
+
+rem ---- Go (builds the Windows client and the server) ----
+set "GOROOT=C:\Go"
+set "GOPROXY=https://goproxy.cn,direct"
+
+rem ---- Android toolchain ----
+rem JDK 17 is required by AGP 8.x (not 8 or 11)
+set "JAVA_HOME=C:\Program Files\Java\jdk-17"
+rem Android SDK root (contains platform-tools, platforms, build-tools)
+set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
+rem Gradle executable; leave empty if gradle is already in PATH
+set "GRADLE_BIN="

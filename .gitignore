@@ -1,0 +1,48 @@
+# ===== 构建产物 =====
+dist/*
+!dist/.gitkeep
+*.exe
+*.apk
+*.aab
+*.zip
+*.7z
+
+# ===== 本机工具链路径（含个人目录，不入库） =====
+local-env.bat
+
+# ===== Windows 客户端 =====
+# mpv 播放器体积 100MB+，不入库，用 windows/fetch-mpv.ps1 下载
+windows/mpv/
+# 本地服务器地址（含私人 IP，不入库）
+windows/server.txt
+
+# ===== Android =====
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/app/release/
+
+# ===== 服务端本地配置 =====
+server/.env
+server/deploy.env
+
+# ===== 编辑器 / IDE =====
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 日志 / 临时 =====
+*.log
+tmp/
+temp/
+
+# ===== 本地助手数据（与项目无关） =====
+.workbuddy/

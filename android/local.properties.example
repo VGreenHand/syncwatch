@@ -1,0 +1,6 @@
+# 复制为 local.properties 后修改（该文件不入库）
+# Android SDK 路径（反斜杠需转义，用正斜杠更省事）
+sdk.dir=C:/Android/Sdk
+
+# 客户端默认服务器地址，会被写入 BuildConfig.DEFAULT_SERVER
+syncwatch.server=1.2.3.4:8995

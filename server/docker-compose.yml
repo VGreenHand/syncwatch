@@ -1,0 +1,33 @@
+services:
+  syncwatch:
+    build:
+      context: .
+      args:
+        GO_IMAGE: ${GO_IMAGE:-golang:1.22-alpine}
+        RUNTIME_IMAGE: ${RUNTIME_IMAGE:-alpine:3.20}
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    image: syncwatch:latest
+    container_name: syncwatch
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8995}:8995"
+    environment:
+      PORT: "8995"
+      TZ: Asia/Shanghai
+    # 安全与资源限制：只读根文件系统 + 非 root + 硬上限
+    read_only: true
+    mem_limit: 256m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8995/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

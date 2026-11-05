@@ -1,0 +1,58 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.syncwatch.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.syncwatch.app"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "0.1"
+
+        // 默认服务器地址：写在 local.properties 的 syncwatch.server（该文件不入库）
+        // 这样换服务器不用改代码，也不会把私人地址提交到仓库
+        buildConfigField "String", "DEFAULT_SERVER", "\"${readDefaultServer()}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.media3:media3-exoplayer:1.3.1'
+    implementation 'androidx.media3:media3-ui:1.3.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}
+
+// 读取本机配置：local.properties 中的 syncwatch.server=host:port
+def readDefaultServer() {
+    def value = "127.0.0.1:8995"
+    def f = rootProject.file("local.properties")
+    if (f.exists()) {
+        def props = new Properties()
+        f.withInputStream { props.load(it) }
+        def v = props.getProperty("syncwatch.server")
+        if (v != null && !v.trim().isEmpty()) value = v.trim()
+    }
+    return value
+}
