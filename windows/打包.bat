@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 rem ============================================================
 rem  打包成可分发压缩包：dist\一起看-windows-v0.1.zip
-rem  收到的人解压后双击「启动观影.bat」即可，无需安装任何东西
+rem  对方解压后双击「启动观影.bat」即可，无需安装任何东西
 rem ============================================================
 
 if not exist "syncwatch-win.exe" (
@@ -32,9 +32,9 @@ echo [1/2] 收集文件到临时目录...
 set "STAGE=%TEMP%\syncwatch-pkg"
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"
-copy /y "syncwatch-win.exe" "%STAGE%\" >nul
-copy /y "启动观影.bat" "%STAGE%\" >nul
-copy /y "使用说明.txt" "%STAGE%\" >nul
+copy /y "syncwatch-win.exe" "%STAGE%" >nul
+copy /y "启动观影.bat" "%STAGE%" >nul
+copy /y "使用说明.txt" "%STAGE%" >nul
 xcopy "mpv" "%STAGE%\mpv\" /E /I /Y /Q >nul
 
 echo [2/2] 压缩...
@@ -46,7 +46,7 @@ if errorlevel 1 (
 )
 rmdir /s /q "%STAGE%"
 
-for %%f in ("%ZIP%") do echo.
+echo.
 for %%f in ("%ZIP%") do echo ✅ 打包完成：%%~ff  (%%~zf 字节)
 echo.
 echo 把该 zip 发给朋友，解压双击「启动观影.bat」即可。
