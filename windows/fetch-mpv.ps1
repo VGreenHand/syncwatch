@@ -19,8 +19,16 @@ if (-not $Url) {
     Write-Host "查询 mpv 最新版本（GitHub）..."
     $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest" `
         -Headers @{ "User-Agent" = "syncwatch" }
-    $asset = $rel.assets | Where-Object { $_.name -like "*x86_64*.7z" } | Select-Object -First 1
-    if (-not $asset) { throw "release 中未找到 x86_64 的 7z 包，请用 -Url 手动指定下载地址" }
+    # 这个 release 里同时有 ffmpeg-*.7z、mpv-debug-*.7z、mpv-*.7z，顺序还不可靠：
+    # 过滤太松会先命中 ffmpeg（解压后没有 mpv.exe，CI 上就这么失败过）或 mpv-debug（体积翻倍）。
+    # 因此精确到 "mpv-x86_64-*.7z"，并排除 -v3- 变体（AVX2 专版，老 CPU 直接起不来）。
+    $asset = $rel.assets |
+        Where-Object { $_.name -like "mpv-x86_64-*.7z" -and $_.name -notlike "*-v3-*" } |
+        Select-Object -First 1
+    if (-not $asset) {
+        $asset = $rel.assets | Where-Object { $_.name -like "mpv-x86_64-*.7z" } | Select-Object -First 1
+    }
+    if (-not $asset) { throw "release 中未找到 mpv 的 7z 包，请用 -Url 手动指定下载地址" }
     $Url = $asset.browser_download_url
     Write-Host "  版本: $($rel.tag_name)"
 }
@@ -41,7 +49,11 @@ New-Item -ItemType Directory -Path $Dest | Out-Null
 & $7zr x $archive "-o$Dest" -y | Out-Null
 
 $exe = Get-ChildItem $Dest -Filter "mpv.exe" -Recurse | Select-Object -First 1
-if (-not $exe) { throw "解压完成但未找到 mpv.exe，请检查压缩包结构" }
+if (-not $exe) {
+    Write-Host "解压目录内容（前 10 项）："
+    Get-ChildItem $Dest -Recurse -File | Select-Object -First 10 | ForEach-Object { Write-Host "  $($_.Name)" }
+    throw "解压完成但未找到 mpv.exe，请检查压缩包结构"
+}
 
 Remove-Item $tmp -Recurse -Force
 Write-Host ""
