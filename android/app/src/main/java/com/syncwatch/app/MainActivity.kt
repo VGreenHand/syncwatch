@@ -39,6 +39,8 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     private var fileInfoSent = false
     private var lastBuffering = false
     private var currentRoom = ""
+    // 仅 debug：进房后自动点击"播放"，用于双端联调（模拟器上点控件不可靠）
+    private var debugAutoplay = false
 
     private val filePicker = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
@@ -79,6 +81,49 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
             filePicker.launch(arrayOf("video/*"))
         }
         findViewById<View>(R.id.btnJoin).setOnClickListener { tryJoin() }
+
+        handleDebugIntent()
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // 调试入口可能以"热启动"方式送达（Activity 已在栈顶），
+        // 这时不会走 onCreate，需要在这里再处理一次。
+        if (playerLayout.visibility == View.VISIBLE) finishPlayer()
+        handleDebugIntent()
+    }
+
+    /**
+     * 仅 debug 构建生效的自动化入口，用于双端联调时跳过系统文件选择器：
+     *
+     *   adb shell am start -n com.syncwatch.app/.MainActivity \
+     *     --es video /sdcard/Android/data/com.syncwatch.app/files/test.mp4 \
+     *     --es server 127.0.0.1:18998 --es name 平板端 --es room ROOM99 --ez autojoin true
+     *
+     * 视频路径必须在应用自己的外部目录下，免得受存储权限影响。
+     * release 构建里 BuildConfig.DEBUG 为 false，这段不会执行。
+     */
+    private fun handleDebugIntent() {
+        if (!BuildConfig.DEBUG) return
+        val video = intent?.getStringExtra("video") ?: return
+        // 相对文件名 → 应用私有目录；绝对路径 → 原样使用。
+        // 私有目录最稳：adb 推到 /sdcard 的文件受 FUSE/SELinux 限制，app 往往读不到。
+        val f = if (video.startsWith("/")) java.io.File(video) else java.io.File(filesDir, video)
+        if (!f.exists()) {
+            toast("调试视频不存在: ${f.absolutePath}")
+            return
+        }
+        intent?.getStringExtra("server")?.takeIf { it.isNotBlank() }?.let { etServer.setText(it) }
+        intent?.getStringExtra("name")?.takeIf { it.isNotBlank() }?.let { etName.setText(it) }
+        intent?.getStringExtra("room")?.takeIf { it.isNotBlank() }?.let { etRoom.setText(it) }
+        fileUri = Uri.fromFile(f)
+        fileName = f.name
+        fileText.text = fileName
+        debugAutoplay = intent?.getBooleanExtra("autoplay", false) == true
+        if (intent?.getBooleanExtra("autojoin", false) == true) {
+            fileText.post { tryJoin() }
+        }
     }
 
     private fun tryJoin() {
@@ -197,6 +242,14 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
             toast("已加入房间 $room")
         }
         engine?.startHeartbeat()
+        if (debugAutoplay) {
+            roomText.postDelayed({
+                if (::player.isInitialized && !player.isPlaying) {
+                    toast("调试：自动播放")
+                    player.play()
+                }
+            }, 2500)
+        }
     }
 
     /** 点顶部房间码即可复制，不用手抄那 6 位 */

@@ -175,6 +175,33 @@ func (c *MpvClient) getFloatOK(prop string) (float64, bool) {
 	return f, true
 }
 
+// getBool 读布尔属性。
+//
+// 必须单独实现：mpv 的 pause / paused-for-cache 是 JSON 布尔，
+// 用 getFloat 去解会 Unmarshal 失败并静默得到 0（= false），
+// 于是"是否暂停"永远读成"没暂停" —— 表现为远端发起播放时本端怎么也不动。
+func (c *MpvClient) getBool(prop string) (bool, bool) {
+	raw, err := c.get(prop)
+	if err != nil || len(raw) == 0 || string(raw) == "null" {
+		return false, false
+	}
+	var b bool
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return false, false
+	}
+	return b, true
+}
+
+// isPaused 当前是否暂停。读不到时保守地认为"已暂停"，
+// 这样 applyRemoteState 在执行播放时会无条件取消暂停，不会卡住。
+func (c *MpvClient) isPaused() bool {
+	b, ok := c.getBool("pause")
+	if !ok {
+		return true
+	}
+	return b
+}
+
 func (c *MpvClient) getString(prop string) string {
 	raw, err := c.get(prop)
 	if err != nil {
@@ -210,9 +237,6 @@ var (
 	// 最近一次可信的播放位置。取不到当前值时就报它，绝不报 0。
 	lastGoodPos atomic.Value // float64
 
-	// 我们自己下发的 pause 会让 mpv 产生事件，短窗口内视为回声不回报。
-	progPauseUntil atomic.Int64 // unix 毫秒
-
 	// 我们自己下发的 seek 的抑制窗口。mpv 一次 seek 会连发多个 seek 事件
 	// （实测还会带一个 playback-time=0 的中间态），所以只能用"整段忽略"，
 	// 单个标记匹配堵不住——放过去就是把全房间拉回片头。
@@ -220,7 +244,24 @@ var (
 
 	// 上次上报过的跳转位置，用来过滤同一位置重复上报（mpv 常连发多条）
 	lastReportedSeek atomic.Value // float64
+
+	// 防止 mpv 连发 seek 事件时并发跑多份上报流程
+	seekReporting atomic.Bool
+
+	// 上次上报过的成员状态，没变化就不重复发（否则每 5 秒刷一次屏）
+	lastMemberState atomic.Value // string
 )
+
+// reportMemberState 立刻把成员状态告诉服务器（有变化才发）。
+// 不这么做的话，界面上"谁在播放"要等下一次心跳（5 秒）才更新，
+// 观感上就是"操作完了对面半天没反应"。
+func reportMemberState(st string) {
+	if cur, _ := lastMemberState.Load().(string); cur == st {
+		return
+	}
+	lastMemberState.Store(st)
+	sendMsg(Msg{Type: "memberState", State: st})
+}
 
 func sendMsg(m Msg) {
 	wsMu.Lock()
@@ -244,13 +285,8 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 		if !helloRecv.Load() {
 			return
 		}
-		// 只忽略"我们自己刚下发的 set_property(pause)"造成的回声，
-		// 不再用全局 800ms 时间窗 —— 那会把用户紧跟其后的操作一并吞掉，
-		// 表现为"在 Windows 上点暂停，对方要等好几秒甚至根本不响应"。
-		if time.Now().UnixMilli() < progPauseUntil.Load() {
-			return
-		}
-		// 与房间当前状态一致 → 回声或播放器启动期的延迟事件，不上报
+		// 与房间当前状态一致 → 回声或播放器启动期的延迟事件，不上报。
+		// 这里靠状态比对而不是时间窗：时间窗会把用户紧跟其后的操作一起吞掉。
 		if cur, _ := roomState.Load().(string); (paused && cur == "paused") || (!paused && cur == "playing") {
 			return
 		}
@@ -263,6 +299,7 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 			roomState.Store("paused")
 			log.Printf("%s 你暂停了 @%.1fs", cyan("[本地]"), pos)
 			sendMsg(Msg{Type: "pause", Position: pos})
+			reportMemberState("paused")
 		} else {
 			roomState.Store("playing")
 			log.Printf("%s 你播放了 @%.1fs", cyan("[本地]"), pos)
@@ -271,6 +308,7 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 				rate = 1.0
 			}
 			sendMsg(Msg{Type: "play", Position: pos, Rate: rate})
+			reportMemberState("playing")
 		}
 	case "paused-for-cache":
 		var p bool
@@ -282,7 +320,7 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 		if p {
 			sendMsg(Msg{Type: "memberState", State: "buffering"})
 		} else if !p {
-			paused := mpv.getFloat("pause") > 0.5
+			paused := mpv.isPaused()
 			if !paused {
 				sendMsg(Msg{Type: "memberState", State: "playing"})
 			}
@@ -292,37 +330,49 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 
 // handleMpvSeekEvent 处理 mpv 的 seek 事件。
 //
-// 三个必须同时挡住的东西，都是实测踩出来的：
-//  1. 我们执行远端指令造成的跳转，不能回报（否则 A→B→A 回声）；
-//  2. mpv 一次 seek 会连发多条事件，其中可能夹一条 playback-time=0 的中间态，
-//     这种 0 一旦上报，服务端把房间位置改成 0，全房间跳片头；
-//  3. 同一位置连发多次，没必要重复上报。
-//
-// 因此：用 progSeekUntil 整段忽略程序性跳转，位置优先取事件自带的 playback-time
-// （比再查一次 time-pos 准确，seek 未完成时 time-pos 可能还是旧值或 null），
-// 并对 1 秒内的同位置去重。
+// 关键教训（v0.4）：**不能**用事件自带的 playback-time 当跳转目标。
+// 实测把进度拖到 150s，事件里的 playback-time 仍是 0（mpv 在跳转完成前就发了事件），
+// 照它上报 → 服务端把房间位置改成 0 → 全房间跳片头。
+// 正确做法是等 mpv 的 seeking 变 false 之后再读 time-pos。
 func handleMpvSeekEvent(playbackTime float64) {
 	if !helloRecv.Load() {
 		return
 	}
-	now := time.Now().UnixMilli()
-	if now < progSeekUntil.Load() {
-		// 程序性跳转期间：只更新可信位置，绝不回报
-		if playbackTime >= 0 && !math.IsNaN(playbackTime) {
+	// 程序性跳转期间一律不回报（我们自己的 seek，或刚应用完远端指令）
+	if time.Now().UnixMilli() < progSeekUntil.Load() {
+		if !math.IsNaN(playbackTime) && playbackTime >= 0 {
 			lastGoodPos.Store(playbackTime)
 		}
 		return
 	}
-	pos := playbackTime
-	if math.IsNaN(pos) || pos < 0 {
-		var ok bool
-		pos, ok = posOrLast()
-		if !ok {
-			return
-		}
+	// 同一时刻只跑一个上报流程，避免 mpv 连发多个 seek 事件造成重复上报
+	if !seekReporting.CompareAndSwap(false, true) {
+		return
 	}
+	go func() {
+		defer seekReporting.Store(false)
+		reportUserSeek()
+	}()
+}
+
+// reportUserSeek 等 seek 真正落地后，把准确位置报给服务器。
+func reportUserSeek() {
+	// 等 mpv 结束跳转（最多 ~1.2s），seeking=false 时 time-pos 才是目标位置
+	for i := 0; i < 12; i++ {
+		if seeking, ok := mpv.getBool("seeking"); !ok || !seeking {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	time.Sleep(80 * time.Millisecond)
+
+	pos, ok := mpv.getFloatOK("time-pos")
+	if !ok || pos < 0 || math.IsNaN(pos) || math.IsInf(pos, 0) {
+		return
+	}
+	// 同位置 1 秒内不重复上报
 	if v, ok := lastReportedSeek.Load().(float64); ok && abs(v-pos) < 1.0 {
-		return // 同一位置重复事件
+		return
 	}
 	lastReportedSeek.Store(pos)
 	lastGoodPos.Store(pos)
@@ -333,31 +383,41 @@ func handleMpvSeekEvent(playbackTime float64) {
 // ---------- 服务器消息 → mpv ----------
 
 func applyRemoteState(state string, pos, rate float64, reason string) {
-	cur := mpv.getFloat("time-pos")
-	needSeek := abs(cur-pos) > SOFT_DRIFT
+	prev, _ := roomState.Load().(string)
+	stateChanged := prev != state
+	roomState.Store(state) // 先更新，后面 mpv 的回声会被状态比对挡住
 	if pos < 0 {
 		pos = 0
 	}
-	roomState.Store(state)
+	// 纠偏阈值分档：播放/暂停切换要跟手（0.5s），
+	// 而纯粹的位置同步没必要为 0.4 秒的误差去做精确 seek —— 那会打断播放，
+	// 手感上就是"一卡一卡、不如以前丝滑"。
+	needSeek := false
+	if cur, ok := mpv.getFloatOK("time-pos"); ok && !math.IsNaN(cur) {
+		threshold := 0.5
+		if !stateChanged {
+			threshold = 1.5
+		}
+		needSeek = abs(cur-pos) > threshold
+	}
 	if needSeek {
 		// 开启抑制窗口，覆盖 mpv 一次 seek 连发的多个事件（含 0 中间态）
 		progSeekUntil.Store(time.Now().Add(1500 * time.Millisecond).UnixMilli())
 		mpv.cmd("seek", pos, "absolute+exact")
 	}
+	// 无条件设置、幂等执行：mpv 对"设置成相同值"不会产生 property-change，
+	// 所以不需要先查询（而查询布尔属性以前还会因为类型解错而永远读到 false，
+	// 导致"播放"分支根本不执行，远端一放音本端就不动）。
 	if state == "playing" {
-		if mpv.getFloat("pause") > 0.5 {
-			progPauseUntil.Store(time.Now().Add(700 * time.Millisecond).UnixMilli())
-			mpv.cmd("set_property", "pause", false)
-		}
+		mpv.cmd("set_property", "pause", false)
 		if rate > 0 && abs(rate-mpv.getFloat("speed")) > 0.01 {
 			mpv.cmd("set_property", "speed", rate)
 		}
 	} else {
-		if mpv.getFloat("pause") < 0.5 {
-			progPauseUntil.Store(time.Now().Add(700 * time.Millisecond).UnixMilli())
-			mpv.cmd("set_property", "pause", true)
-		}
+		mpv.cmd("set_property", "pause", true)
 	}
+	// 跟上远端后立刻回报自己的成员状态，别让成员列表等到下一次心跳
+	reportMemberState(state)
 	log.Printf("%s %s → %s @%.1fs", magenta("[同步]"), reason, stateLabel(state), pos)
 }
 
@@ -455,7 +515,7 @@ func namesOf(ms []MemberInfo) string {
 }
 
 func playStateOf() string {
-	if mpv.getFloat("pause") > 0.5 {
+	if mpv.isPaused() {
 		return "paused"
 	}
 	return "playing"
@@ -701,10 +761,15 @@ func main() {
 			if !rok || rate <= 0 {
 				rate = 1.0
 			}
-			paused := mpv.getFloat("pause") > 0.5
+			paused := mpv.isPaused()
 			sendMsg(Msg{Type: "heartbeat", Position: pos, Rate: rate})
+			st := "paused"
 			if !paused && !lastCachePause {
-				sendMsg(Msg{Type: "memberState", State: "playing"})
+				st = "playing"
+			}
+			if cur, _ := lastMemberState.Load().(string); cur != st {
+				lastMemberState.Store(st)
+				sendMsg(Msg{Type: "memberState", State: st})
 			}
 		}
 	}()

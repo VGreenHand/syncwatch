@@ -66,6 +66,8 @@ class SyncEngine(
 
     // 本地操作抑制窗口（应用远端指令时不回发）
     @Volatile private var suppressUntil = 0L
+    // 上次上报过的成员状态，避免每 5 秒重复发
+    private var lastSentMemberState = ""
     private fun suppress(ms: Long) { suppressUntil = System.currentTimeMillis() + ms }
     private fun suppressed() = System.currentTimeMillis() < suppressUntil
 
@@ -73,8 +75,14 @@ class SyncEngine(
         override fun run() {
             if (closed) return
             send(Protocol.heartbeat(player.currentPos(), player.currentRate()))
-            if (player.isPlaying() && !player.isBuffering()) {
-                send(Protocol.memberState("playing"))
+            val st = when {
+                player.isBuffering() -> "buffering"
+                player.isPlaying() -> "playing"
+                else -> "paused"
+            }
+            if (st != lastSentMemberState) {
+                lastSentMemberState = st
+                send(Protocol.memberState(st))
             }
             main.postDelayed(this, HB_INTERVAL)
         }
@@ -124,6 +132,7 @@ class SyncEngine(
         val m = try { JSONObject(text) } catch (e: Exception) { return }
         when (m.optString("type")) {
             "hello" -> {
+                Log.i(TAG, "recv hello room=${m.optString("room")} state=${m.optString("state")} pos=${m.optDouble("position")}")
                 reconnectAttempts = 0
                 roomCode = m.optString("room")
                 helloReceived.set(true)
@@ -138,6 +147,7 @@ class SyncEngine(
                 listener.onMembers(Protocol.parseMembers(m.optJSONArray("members")))
             }
             "sync" -> {
+                Log.i(TAG, "recv sync state=${m.optString("state")} pos=${m.optDouble("position")} op=${m.optString("operator")} local=$roomState")
                 val operator = m.optString("operator")
                 val state = m.optString("state")
                 var pos = m.optDouble("position", 0.0)
@@ -182,24 +192,29 @@ class SyncEngine(
     // ---------- 本地操作上报（由 PlayerAdapter 回调触发） ----------
 
     fun onLocalPlay() {
+        Log.i(TAG, "onLocalPlay hello=${helloReceived.get()} suppress=${suppressed()} roomState=$roomState")
         if (!helloReceived.get() || suppressed()) return
         if (roomState == "playing") return
         roomState = "playing"
         send(Protocol.play(player.currentPos(), player.currentRate()))
+        sendMemberState("playing")
         listener.onNotice("你播放了 @${fmt(player.currentPos())}")
     }
 
     fun onLocalPause() {
+        Log.i(TAG, "onLocalPause hello=${helloReceived.get()} suppress=${suppressed()} roomState=$roomState buffering=${player.isBuffering()}")
         if (!helloReceived.get() || suppressed()) return
         // 缓冲/卡顿不是暂停，别把全房间停住
         if (player.isBuffering()) return
         if (roomState == "paused") return
         roomState = "paused"
         send(Protocol.pause(player.currentPos()))
+        sendMemberState("paused")
         listener.onNotice("你暂停了 @${fmt(player.currentPos())}")
     }
 
     fun onLocalSeek(pos: Double) {
+        Log.i(TAG, "onLocalSeek pos=$pos hello=${helloReceived.get()} suppress=${suppressed()}")
         if (!helloReceived.get() || suppressed()) return
         send(Protocol.seek(pos))
         listener.onNotice("你跳转到了 ${fmt(pos)}")
@@ -214,7 +229,15 @@ class SyncEngine(
         send(Protocol.fileInfo(name, duration))
     }
 
+    /** 立刻同步成员状态（有变化才发），避免界面要等下一次心跳才更新 */
+    private fun sendMemberState(st: String) {
+        if (st == lastSentMemberState) return
+        lastSentMemberState = st
+        send(Protocol.memberState(st))
+    }
+
     fun send(text: String) {
+        Log.i(TAG, "send ${text.take(140)}")
         ws?.send(text)
     }
 

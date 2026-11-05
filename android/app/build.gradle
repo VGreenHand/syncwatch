@@ -11,8 +11,8 @@ android {
         applicationId "com.syncwatch.app"
         minSdk 24
         targetSdk 34
-        versionCode 3
-        versionName "0.3"
+        versionCode 4
+        versionName "0.4"
 
         // 默认服务器地址：写在 local.properties 的 syncwatch.server（该文件不入库）
         // 这样换服务器不用改代码，也不会把私人地址提交到仓库

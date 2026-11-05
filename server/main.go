@@ -319,6 +319,15 @@ func (m *Member) readLoop() {
 			continue
 		}
 
+		// 调试日志：把每条控制消息连同操作者与位置记下来，
+		// 排查"谁把房间拉回片头"时第一眼就能看到。
+		switch msg.Type {
+		case "play", "pause", "seek", "heartbeat":
+			if msg.Type != "heartbeat" {
+				log.Printf("[msg] %s %s pos=%.2f rate=%.2f", m.name, msg.Type, msg.Position, msg.Rate)
+			}
+		}
+
 		m.room.mu.Lock()
 		switch msg.Type {
 		case "play":
@@ -527,7 +536,7 @@ func main() {
 	})
 	http.HandleFunc("/ws", serveWS)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("syncwatch-server v0.3 ok"))
+		w.Write([]byte("syncwatch-server v0.4 ok"))
 	})
 
 	log.Printf("syncwatch-server listening on :%s", port)

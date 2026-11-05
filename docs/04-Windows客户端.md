@@ -11,7 +11,7 @@ windows/
 ├── build.bat             编译（有 Go 用 Go，有 Docker 用 Docker）
 ├── fetch-mpv.ps1         下载 mpv 到 .\mpv\（约 33MB）
 ├── 启动观影.bat           双击运行
-├── 打包.bat               打成 dist\一起看-windows-v0.3.zip 分发
+├── 打包.bat               打成 dist\一起看-windows-v0.4.zip 分发
 ├── server.txt            你的服务器地址（不入库，需自己创建）
 ├── mpv/                  播放内核（不入库）
 └── syncwatch-win.exe     编译产物（不入库）
@@ -107,7 +107,7 @@ cd windows
 打包.bat
 ```
 
-产出 `dist\一起看-windows-v0.3.zip`（exe + mpv + 启动脚本 + 说明），对方解压双击即可，无需装任何东西。
+产出 `dist\一起看-windows-v0.4.zip`（exe + mpv + 启动脚本 + 说明），对方解压双击即可，无需装任何东西。
 
 ## 常见问题
 

@@ -17,7 +17,7 @@ import (
 	"unsafe"
 )
 
-const AppVersion = "v0.3"
+const AppVersion = "v0.4"
 
 var vtEnabled atomic.Bool
 
