@@ -1,7 +1,7 @@
 name: build
 
-# 打 tag（如 v0.1）或手动触发时，编译服务端与 Windows 客户端并上传产物。
-# Android 需要 Android SDK，建议本地用 android/build-apk.bat 构建，见 docs/05。
+# 打 tag（如 v0.2）或手动触发时，编译服务端、Windows 客户端与 Android APK 并上传产物。
+# Windows 产物不内置服务器地址（构建时不传 -X main.builtinServer），符合"仓库不含私人地址"的约定。
 on:
   push:
     tags: ["v*"]
@@ -64,10 +64,28 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # 不再用 android-actions/setup-android：它调用的 sdkmanager 与当前 runner 镜像
+      # 不兼容（Failed to find package 'tools'），而 ubuntu-latest 本来就预装了 Android SDK。
+      - name: 使用 runner 预装的 Android SDK
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-}"
+          if [ -z "$SDK" ] || [ ! -d "$SDK" ]; then SDK="/usr/local/lib/android/sdk"; fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "sdk.dir=$SDK" > local.properties
+          echo "使用 SDK: $SDK"
+          ls "$SDK/platforms" 2>/dev/null || true
+      - name: 补齐 SDK 34 组件（已存在则跳过）
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SM" ] || SM=$(find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -1)
+          if [ -n "$SM" ]; then
+            yes | "$SM" --licenses > /dev/null 2>&1 || true
+            "$SM" "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
+            echo "SDK 组件就绪"
+          fi
       - name: Build debug APK
         run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --console=plain
       - uses: actions/upload-artifact@v4
