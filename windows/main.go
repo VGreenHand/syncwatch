@@ -186,6 +186,11 @@ var (
 	helloOnce    sync.Once
 	helloRecv    atomic.Bool
 
+	// 服务器最近一次告知的房间状态（playing/paused）。
+	// 本地播放器事件若与之一致，说明是"应用远端状态"引起的回声或 mpv 启动时的
+	// 延迟事件，不应再上报——否则加入一个正在播放的房间会把全房间拉回 0 秒。
+	roomState atomic.Value
+
 	// 本地是否处于"用户暂停"状态，用于 memberState
 	lastCachePause bool
 )
@@ -222,11 +227,17 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 		if suppressed() || !helloRecv.Load() {
 			return
 		}
+		// 与房间当前状态一致 → 是回声或播放器启动期的延迟事件，不上报
+		if cur, _ := roomState.Load().(string); (paused && cur == "paused") || (!paused && cur == "playing") {
+			return
+		}
 		pos := mpv.getFloat("time-pos")
 		if paused {
+			roomState.Store("paused")
 			log.Printf("[本地] 你暂停了 @%.1fs", pos)
 			sendMsg(Msg{Type: "pause", Position: pos})
 		} else {
+			roomState.Store("playing")
 			log.Printf("[本地] 你播放了 @%.1fs", pos)
 			rate := mpv.getFloat("speed")
 			sendMsg(Msg{Type: "play", Position: pos, Rate: rate})
@@ -263,6 +274,7 @@ func handleMpvSeekEvent() {
 func applyRemoteState(state string, pos, rate float64, reason string) {
 	cur := mpv.getFloat("time-pos")
 	needSeek := abs(cur-pos) > SOFT_DRIFT
+	roomState.Store(state)
 	suppress(800)
 	if needSeek {
 		mpv.cmd("seek", pos, "absolute+exact")
@@ -473,6 +485,7 @@ func prompt(label, def string) string {
 func main() {
 	flag.Parse()
 	log.SetFlags(log.Ltime)
+	roomState.Store("paused")
 
 	myName = *nameFlag
 	if myName == "" {

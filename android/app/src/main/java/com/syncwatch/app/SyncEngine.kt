@@ -53,6 +53,11 @@ class SyncEngine(
     private var ws: WebSocket? = null
     private val main = Handler(Looper.getMainLooper())
     private val helloReceived = AtomicBoolean(false)
+
+    // 服务器最近一次告知的房间状态（playing/paused）。
+    // 本地事件与之一致 → 说明是"应用远端状态"引起的回声或播放器初始化事件，不予上报，
+    // 否则加入一个正在播放的房间会把全房间拉回 0 秒（Windows 端同一处修复）。
+    @Volatile private var roomState: String = "paused"
     private var roomCode = ""
     private var password = ""
     private var reconnectAttempts = 0
@@ -124,6 +129,7 @@ class SyncEngine(
                 val state = m.optString("state", "paused")
                 val pos = m.optDouble("position", 0.0)
                 val rate = m.optDouble("rate", 1.0).toFloat()
+                roomState = state
                 suppress(1500)
                 player.seekTo(pos)
                 if (state == "playing") player.play(pos, rate) else player.pause(pos)
@@ -136,6 +142,7 @@ class SyncEngine(
                 val pos = m.optDouble("position", 0.0)
                 val rate = m.optDouble("rate", 1.0).toFloat()
                 val needSeek = Math.abs(player.currentPos() - pos) > SOFT_DRIFT
+                roomState = state
                 suppress(1500)
                 if (needSeek) player.seekTo(pos)
                 if (state == "playing") player.play(pos, rate) else player.pause(pos)
@@ -162,12 +169,16 @@ class SyncEngine(
 
     fun onLocalPlay() {
         if (!helloReceived.get() || suppressed()) return
+        if (roomState == "playing") return
+        roomState = "playing"
         send(Protocol.play(player.currentPos(), player.currentRate()))
         listener.onNotice("你播放了 @${fmt(player.currentPos())}")
     }
 
     fun onLocalPause() {
         if (!helloReceived.get() || suppressed()) return
+        if (roomState == "paused") return
+        roomState = "paused"
         send(Protocol.pause(player.currentPos()))
         listener.onNotice("你暂停了 @${fmt(player.currentPos())}")
     }
