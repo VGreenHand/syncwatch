@@ -4,7 +4,7 @@ Kotlin + Media3(ExoPlayer) + OkHttp WebSocket，minSdk 24（Android 7.0+），�
 
 ## 安装
 
-1. 把 `dist\一起看-android-v0.1.apk` 传到手机（微信文件传输 / 数据线 / 网盘均可）
+1. 把 `dist\一起看-android-v0.2.apk` 传到手机（微信文件传输 / 数据线 / 网盘均可）
 2. 点击安装，首次提示"未知来源应用"时允许
 3. 系统要求：Android 7.0 及以上
 
@@ -66,7 +66,7 @@ build-apk.bat
 1. 按 `JAVA_HOME` → `F:\android-tools\jdk17*` 顺序自动找 JDK 17；
 2. 按 `ANDROID_HOME` → `F:\android-tools\sdk` 找 SDK，并写入临时 `local.properties`；
 3. **把工程复制到纯 ASCII 路径**（`%TEMP%\syncwatch-android-build`）再编译 —— AGP 不接受含中文的项目路径，这是踩过的坑；
-4. 产物拷到 `dist\一起看-android-v0.1.apk`。
+4. 产物拷到 `dist\一起看-android-v0.2.apk`。
 
 ### 手动构建
 
@@ -87,7 +87,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties   # 或直接复制 local.proper
 - 包名：`android/app/build.gradle` 的 `namespace` 与 `applicationId`（两处要一起改）
 - 应用名：`android/app/src/main/res/values/strings.xml` 的 `app_name`
 
-## 已知限制（v0.1）
+## 已知限制
 
 - 依赖系统解码器：MP4/MKV 的 H.264/H.265 + AAC 全覆盖；**DTS 等特殊音轨会无声**（未集成 ffmpeg 扩展）
 - 切到后台会暂停（未做前台 Service，观影场景本身需要亮屏）

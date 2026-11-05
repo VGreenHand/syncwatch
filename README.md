@@ -67,16 +67,16 @@ cd windows
 fetch-mpv.ps1            :: 第一次：下载 mpv 到 windows\mpv\
 build.bat                :: 编译 syncwatch-win.exe（需要 Go 1.21+）
 echo 你的服务器IP:8995> server.txt
-启动观影.bat              :: 双击，按提示输入昵称、拖入视频
+启动观影.bat              :: 双击，按提示输入昵称、拖入视频、填房间码
 ```
 
-不装 Go 也可以直接从 Releases 下载打包好的 `一起看-windows-v0.1.zip`，解压双击即可。
+不装 Go 也可以直接从 Releases 下载打包好的 `一起看-windows-v0.2.zip`，解压双击即可。
 
 ### 3. Android 端
 
 ```bat
 cd android
-build-apk.bat            :: 产出 dist\一起看-android-v0.1.apk
+build-apk.bat            :: 产出 dist\一起看-android-v0.2.apk
 ```
 
 APK 传到手机侧载安装（Android 7.0+），或在 Releases 直接下载。详见 [docs/05-Android客户端.md](docs/05-Android客户端.md)。
@@ -168,6 +168,14 @@ cd tools/ctl && go run . -room TEST01 -name remote -cmd play -pos 30
 ## 常见问题
 
 <details>
+<summary><b>两个人不在同一个房间，各看各的</b></summary>
+
+最常见原因：**两个人都直接回车**，于是各自创建了一个房间。正确流程是——一个人先创建，把控制台醒目打印的 6 位房间码（已自动复制到剪贴板）发给另一个人，后者启动时填进「房间码」这一步。
+
+如果看到红字「你输入的房间码 XXX 不存在或已解散」，说明那个房间已解散或码打错了，你其实新建了一个空房间。核对后重启即可。Android 端同理，房间码显示在播放页顶部，点一下可复制。
+</details>
+
+<details>
 <summary><b>两个人画面越看越歪</b></summary>
 
 先确认片源时长是否一致（成员列表会显示）。若时长一致仍在漂移，说明客户端解码速度差异，服务器会在偏差 > 1s 时强制纠偏，检查日志里有没有 `forceSeek`。
@@ -197,7 +205,7 @@ cd tools/ctl && go run . -room TEST01 -name remote -cmd play -pos 30
 本架构不产生任何家庭宽带上行视频流量，只有几十字节的同步指令。**红线：永远不要加客户端间 P2P 传视频的功能**，详见 [docs/01-方案设计.md](docs/01-方案设计.md) 第二章。
 </details>
 
-## 已知限制（v0.1）
+## 已知限制
 
 - Windows 端一台机器只能跑一个实例（mpv 命名管道被占用）
 - Android 端切后台会暂停（未做前台 Service，观影场景本身需要亮屏）
@@ -206,9 +214,9 @@ cd tools/ctl && go run . -room TEST01 -name remote -cmd play -pos 30
 
 ## Roadmap
 
-- [ ] v0.2 房间密码可选、房主踢人、房间锁
-- [ ] v0.2 Android 前台 Service（后台不掉线）
-- [ ] v0.3 语音/文字聊天（纯信令，成本极低）
+- [x] v0.2 Windows 进房入口（此前只能靠命令行 `-room`）、房间码彩色横幅 + 自动复制、双端「房间不存在」提示、Android 界面改版与输入框可读性修复
+- [ ] v0.3 房主踢人、房间锁、Android 前台 Service（后台不掉线）
+- [ ] v0.4 语音/文字聊天（纯信令，成本极低）
 - [ ] v1.0 一体化安装包、自动更新
 
 ## 许可与免责

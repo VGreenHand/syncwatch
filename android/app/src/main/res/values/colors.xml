@@ -1,4 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_bg">#1E88E5</color>
+
+    <!-- 页面与卡片 -->
+    <color name="bg_page">#F2F4F7</color>
+    <color name="bg_card">#FFFFFF</color>
+    <color name="bg_input">#F7F8FA</color>
+    <color name="stroke_input">#E0E4EA</color>
+
+    <!-- 文字：暗色主题 + 浅底会把文字变成看不见的白字，这里统一用深灰 -->
+    <color name="text_primary">#16181D</color>
+    <color name="text_secondary">#8B909A</color>
+    <color name="text_hint">#A9AEB8</color>
+
+    <!-- 品牌色 -->
+    <color name="brand">#4C6FFF</color>
+    <color name="brand_dark">#3B57D6</color>
+    <color name="brand_light">#E8EDFF</color>
+    <color name="ok">#18A058</color>
 </resources>

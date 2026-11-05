@@ -29,7 +29,8 @@ class SyncEngine(
     }
 
     interface Listener {
-        fun onConnected(room: String)
+        // created=true 表示本次新建了房间（输入的房间码不存在时也会新建）
+        fun onConnected(room: String, created: Boolean)
         fun onJoinError(msg: String)
         fun onMembers(members: List<MemberInfo>)
         fun onNotice(text: String)     // 操作归因/系统提示
@@ -133,7 +134,7 @@ class SyncEngine(
                 suppress(1500)
                 player.seekTo(pos)
                 if (state == "playing") player.play(pos, rate) else player.pause(pos)
-                listener.onConnected(roomCode)
+                listener.onConnected(roomCode, m.optBoolean("created", false))
                 listener.onMembers(Protocol.parseMembers(m.optJSONArray("members")))
             }
             "sync" -> {

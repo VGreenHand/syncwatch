@@ -23,28 +23,30 @@ import (
 )
 
 const (
-	SOFT_DRIFT   = 0.3
-	PIPE_NAME    = `\\.\pipe\syncwatch-mpv`
+	SOFT_DRIFT      = 0.3
+	PIPE_NAME       = `\\.\pipe\syncwatch-mpv`
 	HEARTBEAT_EVERY = 5 * time.Second
 )
 
 // ---------- 消息（与服务端协议一致） ----------
 
 type Msg struct {
-	Type     string      `json:"type"`
-	Room     string      `json:"room,omitempty"`
-	Password string      `json:"password,omitempty"`
-	Name     string      `json:"name,omitempty"`
-	Position float64     `json:"position,omitempty"`
-	Rate     float64     `json:"rate,omitempty"`
-	State    string      `json:"state,omitempty"`
-	Operator string      `json:"operator,omitempty"`
-	AnchorMs int64       `json:"anchorMs,omitempty"`
-	Error    string      `json:"error,omitempty"`
-	File     string      `json:"file,omitempty"`
-	Size     int64       `json:"size,omitempty"`
-	Duration float64     `json:"duration,omitempty"`
+	Type     string       `json:"type"`
+	Room     string       `json:"room,omitempty"`
+	Password string       `json:"password,omitempty"`
+	Name     string       `json:"name,omitempty"`
+	Position float64      `json:"position,omitempty"`
+	Rate     float64      `json:"rate,omitempty"`
+	State    string       `json:"state,omitempty"`
+	Operator string       `json:"operator,omitempty"`
+	AnchorMs int64        `json:"anchorMs,omitempty"`
+	Error    string       `json:"error,omitempty"`
+	File     string       `json:"file,omitempty"`
+	Size     int64        `json:"size,omitempty"`
+	Duration float64      `json:"duration,omitempty"`
 	Members  []MemberInfo `json:"members,omitempty"`
+	// Created 仅 hello 携带：true=本次新建了房间，false=加入了已存在的房间
+	Created bool `json:"created,omitempty"`
 }
 
 type MemberInfo struct {
@@ -100,7 +102,7 @@ func (c *MpvClient) readLoop() {
 			continue
 		}
 		if ev.Event == "end-file" {
-			log.Println("[mpv] 播放结束")
+			log.Println(dim("[mpv]") + " 播放结束")
 			continue
 		}
 		if ev.RequestID != 0 {
@@ -115,7 +117,7 @@ func (c *MpvClient) readLoop() {
 			}
 		}
 	}
-	log.Println("[mpv] IPC 断开")
+	log.Println(dim("[mpv]") + " IPC 断开")
 }
 
 func (c *MpvClient) cmd(args ...interface{}) error {
@@ -172,19 +174,19 @@ func (c *MpvClient) getString(prop string) string {
 // ---------- 全局状态 ----------
 
 var (
-	mpv       *MpvClient
-	ws        *websocket.Conn
-	wsMu      sync.Mutex
-	myName    string
-	roomCode  string
-	filePath  string
+	mpv      *MpvClient
+	ws       *websocket.Conn
+	wsMu     sync.Mutex
+	myName   string
+	roomCode string
+	filePath string
 
-	suppressMu   sync.Mutex
+	suppressMu    sync.Mutex
 	suppressUntil time.Time
 
 	// 收到 hello 前忽略本地事件（避免 mpv 初始 --pause 触发误广播）
-	helloOnce    sync.Once
-	helloRecv    atomic.Bool
+	helloOnce sync.Once
+	helloRecv atomic.Bool
 
 	// 服务器最近一次告知的房间状态（playing/paused）。
 	// 本地播放器事件若与之一致，说明是"应用远端状态"引起的回声或 mpv 启动时的
@@ -234,11 +236,11 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 		pos := mpv.getFloat("time-pos")
 		if paused {
 			roomState.Store("paused")
-			log.Printf("[本地] 你暂停了 @%.1fs", pos)
+			log.Printf("%s 你暂停了 @%.1fs", cyan("[本地]"), pos)
 			sendMsg(Msg{Type: "pause", Position: pos})
 		} else {
 			roomState.Store("playing")
-			log.Printf("[本地] 你播放了 @%.1fs", pos)
+			log.Printf("%s 你播放了 @%.1fs", cyan("[本地]"), pos)
 			rate := mpv.getFloat("speed")
 			sendMsg(Msg{Type: "play", Position: pos, Rate: rate})
 		}
@@ -265,7 +267,7 @@ func handleMpvSeekEvent() {
 		return
 	}
 	pos := mpv.getFloat("time-pos")
-	log.Printf("[本地] 你跳转到了 %.1fs", pos)
+	log.Printf("%s 你跳转到了 %.1fs", cyan("[本地]"), pos)
 	sendMsg(Msg{Type: "seek", Position: pos})
 }
 
@@ -287,7 +289,7 @@ func applyRemoteState(state string, pos, rate float64, reason string) {
 	} else {
 		mpv.cmd("set_property", "pause", true)
 	}
-	log.Printf("[同步] %s → %s @%.1fs", reason, stateLabel(state), pos)
+	log.Printf("%s %s → %s @%.1fs", magenta("[同步]"), reason, stateLabel(state), pos)
 }
 
 func stateLabel(s string) string {
@@ -316,7 +318,7 @@ func wsReadLoop() {
 		}
 		_, data, err := c.ReadMessage()
 		if err != nil {
-			log.Printf("[断线] 与服务器连接断开: %v，10 秒后重连…", err)
+			log.Printf("%s 与服务器连接断开: %v，10 秒后重连…", yellow("[断线]"), err)
 			reconnect()
 			continue
 		}
@@ -327,9 +329,11 @@ func wsReadLoop() {
 		switch m.Type {
 		case "hello":
 			helloOnce.Do(func() { helloRecv.Store(true) })
+			requested := roomCode // 覆盖前先留住用户启动时填的码
 			roomCode = m.Room
-			log.Printf("[房间] 已加入房间 %s，当前成员: %s，状态: %s @%.1fs",
-				m.Room, namesOf(m.Members), stateLabel(m.State), m.Position)
+			printRoomBanner(m.Room, m.Created, requested)
+			log.Printf("%s 成员: %s，状态: %s @%.1fs",
+				green("[房间]"), namesOf(m.Members), stateLabel(m.State), m.Position)
 			applyRemoteState(m.State, m.Position, m.Rate, "进入房间同步")
 		case "sync":
 			if m.Operator == myName {
@@ -339,13 +343,13 @@ func wsReadLoop() {
 		case "forceSeek":
 			applyRemoteState(playStateOf(), m.Position, 0, "服务器纠偏")
 		case "members":
-			log.Printf("[成员] %s", namesOf(m.Members))
+			log.Printf("%s %s", cyan("[成员]"), namesOf(m.Members))
 		case "join":
-			log.Printf("[成员] %s 加入了房间", m.Name)
+			log.Printf("%s %s 加入了房间", green("[成员]"), m.Name)
 		case "leave":
-			log.Printf("[成员] %s 离开了房间", m.Name)
+			log.Printf("%s %s 离开了房间", dim("[成员]"), m.Name)
 		case "joinError", "error":
-			log.Printf("[错误] %s", m.Error)
+			log.Printf("%s %s", red("[错误]"), red(m.Error))
 			os.Exit(1)
 		}
 	}
@@ -374,7 +378,7 @@ func playStateOf() string {
 func reconnect() {
 	for i := 0; i < 30; i++ {
 		time.Sleep(10 * time.Second)
-		log.Printf("[重连] 第 %d 次尝试…", i+1)
+		log.Printf("%s 第 %d 次尝试…", yellow("[重连]"), i+1)
 		c, _, err := websocket.DefaultDialer.Dial(serverURL(), nil)
 		if err != nil {
 			continue
@@ -383,10 +387,10 @@ func reconnect() {
 		ws = c
 		wsMu.Unlock()
 		joinRoom(c)
-		log.Printf("[重连] 成功")
+		log.Printf("%s 成功", green("[重连]"))
 		return
 	}
-	log.Println("[重连] 多次失败，退出")
+	log.Println(red("[重连] 多次失败，退出"))
 	os.Exit(1)
 }
 
@@ -477,34 +481,56 @@ func findMpv() string {
 	return "mpv"
 }
 
-func prompt(label, def string) string {
-	fmt.Printf("%s", label)
-	if def != "" {
-		fmt.Printf("[%s] ", def)
+// copyToClipboard 把房间码放进 Windows 剪贴板，方便直接粘给朋友。
+// 通过环境变量传值，避免房间码里的特殊字符被 PowerShell 误解析。
+// 失败不影响使用（比如极精简系统没有 powershell）。
+func copyToClipboard(s string) {
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard -Value $env:SYNCWATCH_CLIP")
+	cmd.Env = append(os.Environ(), "SYNCWATCH_CLIP="+s)
+	if err := cmd.Run(); err == nil {
+		fmt.Println("  （房间码已复制到剪贴板，可直接 Ctrl+V 发给朋友）")
 	}
-	var s string
-	fmt.Scanln(&s)
+}
+
+// stdinReader 读整行。原来用 fmt.Scanln 会在空格处截断，
+// 而拖进来的视频路径经常带空格（D:\我的 电影\a.mkv），会直接读错文件。
+var stdinReader = bufio.NewReader(os.Stdin)
+
+func readLine(def string) string {
+	line, err := stdinReader.ReadString('\n')
+	if err != nil && line == "" {
+		return def
+	}
+	s := strings.Trim(strings.TrimSpace(line), `"'`)
 	if s == "" {
 		return def
 	}
-	return strings.TrimSpace(s)
+	return s
 }
 
 func main() {
 	flag.Parse()
+	enableVT()
 	log.SetFlags(log.Ltime)
 	roomState.Store("paused")
 
+	printHeader()
+
 	myName = *nameFlag
 	if myName == "" {
-		myName = prompt("你的昵称：", "")
+		printStep(1, 4, "你的昵称", "")
+		myName = readLine("")
+	}
+	if myName == "" {
+		myName = "观众"
 	}
 	filePath = *fileFlag
 	if filePath == "" {
-		filePath = prompt("视频文件完整路径（拖入此窗口也可）：", "")
+		printStep(2, 4, "视频文件完整路径", "把文件直接拖进这个窗口即可")
+		filePath = readLine("")
 	}
 	if filePath == "" {
-		log.Fatal("未指定视频文件")
+		log.Fatal(red("未指定视频文件"))
 	}
 	filePath = strings.Trim(filePath, `"' `)
 	isLavfi := strings.HasPrefix(filePath, "av://")
@@ -514,6 +540,16 @@ func main() {
 		}
 	}
 	roomCode = *roomFlag
+	if roomCode == "" {
+		printStep(3, 4, "房间码", "有朋友的房间码就填进去；直接回车 = 你自己创建一个新房间")
+		roomCode = readLine("")
+	}
+	roomCode = strings.ToUpper(strings.TrimSpace(roomCode))
+	if *passFlag == "" {
+		printStep(4, 4, "房间密码", "房间没设密码就直接回车")
+		*passFlag = readLine("")
+	}
+	fmt.Println()
 
 	// 1. 启动 mpv（暂停待命，等 hello 同步）
 	mpvPath := findMpv()
@@ -544,10 +580,10 @@ func main() {
 	}
 	mpv.cmd("observe_property", 1, "pause")
 	mpv.cmd("observe_property", 2, "paused-for-cache")
-	log.Println("已接管 mpv 播放器")
+	log.Println(green("[mpv]") + " 已接管播放器")
 
 	// 3. 连接服务器
-	log.Printf("连接服务器 %s", serverURL())
+	log.Printf("%s %s", dim("[网络]"), serverURL())
 	c, _, err := websocket.DefaultDialer.Dial(serverURL(), nil)
 	if err != nil {
 		log.Fatalf("连接服务器失败: %v", err)
@@ -578,7 +614,7 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	<-sig
-	log.Println("退出房间…")
+	printQuit()
 	sendMsg(Msg{Type: "leave"})
 	mpv.cmd("quit")
 	time.Sleep(300 * time.Millisecond)

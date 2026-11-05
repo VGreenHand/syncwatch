@@ -48,6 +48,10 @@ type Msg struct {
 	Duration float64 `json:"duration,omitempty"`
 	Members  []MemberInfo `json:"members,omitempty"`
 	Reason   string  `json:"reason,omitempty"`
+	// Created 仅在 hello 中出现：true 表示本次 join 新建了房间，
+	// false 表示加入了一个已存在的房间。客户端用它提示用户
+	// “你输入的房间码不存在，已为你新建房间”，避免误以为进了朋友的房间。
+	Created  bool    `json:"created,omitempty"`
 }
 
 type MemberInfo struct {
@@ -164,10 +168,14 @@ func cleanupRoom(r *Room) {
 
 // ---------- 房间操作 ----------
 
-func getOrCreateRoom(code, password string) *Room {
+// getOrCreateRoom 返回房间以及“本次是否新建”。
+// 注意：传入一个不存在但非空的 code 也会新建房间（兼容旧客户端），
+// 新建标记通过 hello.created 告知客户端。
+func getOrCreateRoom(code, password string) (*Room, bool) {
 	hubMu.Lock()
 	defer hubMu.Unlock()
 	r, ok := rooms[code]
+	created := false
 	if !ok {
 		r = &Room{
 			code:     code,
@@ -178,8 +186,9 @@ func getOrCreateRoom(code, password string) *Room {
 			created:  time.Now(),
 		}
 		rooms[code] = r
+		created = true
 	}
-	return r
+	return r, created
 }
 
 func randomCode() string {
@@ -355,7 +364,7 @@ func (m *Member) handleJoin(msg Msg) string {
 	if msg.Name == "" {
 		return "name required"
 	}
-	r := getOrCreateRoom(msg.Room, msg.Password)
+	r, created := getOrCreateRoom(msg.Room, msg.Password)
 	r.mu.Lock()
 	if r.password != "" && msg.Password != r.password {
 		r.mu.Unlock()
@@ -380,7 +389,7 @@ func (m *Member) handleJoin(msg Msg) string {
 	r.mu.Unlock()
 
 	// hello：全量状态
-	hello, _ := json.Marshal(Msg{Type: "hello", Room: r.code, State: state, Position: pos, AnchorMs: anchor, Rate: rate, Members: members})
+	hello, _ := json.Marshal(Msg{Type: "hello", Room: r.code, State: state, Position: pos, AnchorMs: anchor, Rate: rate, Members: members, Created: created})
 	select {
 	case m.send <- hello:
 	default:
@@ -457,7 +466,7 @@ func main() {
 	})
 	http.HandleFunc("/ws", serveWS)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("syncwatch-server v0.1 ok"))
+		w.Write([]byte("syncwatch-server v0.2 ok"))
 	})
 
 	log.Printf("syncwatch-server listening on :%s", port)

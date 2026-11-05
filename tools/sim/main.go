@@ -20,6 +20,7 @@ type Msg struct {
 	State    string      `json:"state,omitempty"`
 	Operator string      `json:"operator,omitempty"`
 	Error    string      `json:"error,omitempty"`
+	Created  bool        `json:"created,omitempty"`
 	Members  []struct {
 		Name  string `json:"name"`
 		State string `json:"state"`
@@ -30,6 +31,7 @@ var (
 	role = flag.String("role", "b", "a=创建者等待, b=加入者发指令")
 	addr = flag.String("addr", "127.0.0.1:8995", "服务器")
 	room = flag.String("room", "TEST01", "房间码")
+	nameFlag = flag.String("name", "", "昵称（默认按 role 取 A/B）")
 )
 
 func main() {
@@ -44,6 +46,9 @@ func main() {
 	name := "A"
 	if *role == "b" {
 		name = "B"
+	}
+	if *nameFlag != "" {
+		name = *nameFlag
 	}
 	join, _ := json.Marshal(Msg{Type: "join", Room: *room, Name: name, Password: ""})
 	c.WriteMessage(websocket.TextMessage, join)
@@ -73,8 +78,8 @@ func main() {
 		}
 		var m Msg
 		json.Unmarshal(data, &m)
-		log.Printf("A 收到: %s (state=%s pos=%.1f operator=%s members=%d err=%s)",
-			m.Type, m.State, m.Position, m.Operator, len(m.Members), m.Error)
+		log.Printf("A 收到: %s (state=%s pos=%.1f operator=%s members=%d created=%v err=%s)",
+			m.Type, m.State, m.Position, m.Operator, len(m.Members), m.Created, m.Error)
 	}
 }
 

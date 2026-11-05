@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     private lateinit var joinLayout: LinearLayout
     private lateinit var playerLayout: LinearLayout
     private lateinit var membersText: TextView
+    private lateinit var roomText: TextView
     private lateinit var etServer: EditText
     private lateinit var etName: EditText
     private lateinit var etRoom: EditText
@@ -37,6 +38,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     private var fileName = ""
     private var fileInfoSent = false
     private var lastBuffering = false
+    private var currentRoom = ""
 
     private val filePicker = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
@@ -65,6 +67,8 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         etPass = findViewById(R.id.etPass)
         fileText = findViewById(R.id.fileText)
         membersText = findViewById(R.id.membersText)
+        roomText = findViewById(R.id.roomText)
+        roomText.setOnClickListener { copyRoomCode() }
         playerView = findViewById(R.id.playerView)
 
         etServer.setText(getSharedPreferences("cfg", MODE_PRIVATE).getString("server", BuildConfig.DEFAULT_SERVER))
@@ -170,9 +174,29 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     // ---------- SyncEngine.Listener ----------
 
-    override fun onConnected(room: String) {
-        toast("已加入房间 $room（把房间码发给朋友）")
+    override fun onConnected(room: String, created: Boolean) {
+        currentRoom = room
+        roomText.text = "房间码 $room · 点击复制"
+        if (created) {
+            val requested = etRoom.text.toString().trim()
+            if (requested.isNotEmpty() && !requested.equals(room, ignoreCase = true)) {
+                // 填了码却新建了房间 = 那个房间不存在，必须点破，否则两人各看各的
+                Toast.makeText(this, "房间码 $requested 不存在，已新建房间 $room，请核对朋友发来的码", Toast.LENGTH_LONG).show()
+            } else {
+                toast("已创建房间 $room（把房间码发给朋友）")
+            }
+        } else {
+            toast("已加入房间 $room")
+        }
         engine?.startHeartbeat()
+    }
+
+    /** 点顶部房间码即可复制，不用手抄那 6 位 */
+    private fun copyRoomCode() {
+        if (currentRoom.isEmpty()) return
+        val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("room", currentRoom))
+        toast("房间码 $currentRoom 已复制")
     }
 
     override fun onJoinError(msg: String) {
@@ -181,7 +205,11 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     }
 
     override fun onMembers(members: List<MemberInfo>) {
-        membersText.text = members.joinToString("  ") { "${it.name}(${stateCn(it.state)})" }
+        membersText.text = if (members.isEmpty()) {
+            "暂无成员"
+        } else {
+            "在线 ${members.size} 人 · " + members.joinToString("  ") { "${it.name}(${stateCn(it.state)})" }
+        }
     }
 
     override fun onNotice(text: String) {
@@ -209,6 +237,8 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         engine?.close()
         engine = null
         if (::player.isInitialized) player.release()
+        currentRoom = ""
+        roomText.text = "房间码 —"
         joinLayout.visibility = View.VISIBLE
         playerLayout.visibility = View.GONE
     }
