@@ -131,7 +131,7 @@ class SyncEngine(
                 val pos = m.optDouble("position", 0.0)
                 val rate = m.optDouble("rate", 1.0).toFloat()
                 roomState = state
-                suppress(1500)
+                suppress(600)
                 player.seekTo(pos)
                 if (state == "playing") player.play(pos, rate) else player.pause(pos)
                 listener.onConnected(roomCode, m.optBoolean("created", false))
@@ -140,18 +140,31 @@ class SyncEngine(
             "sync" -> {
                 val operator = m.optString("operator")
                 val state = m.optString("state")
-                val pos = m.optDouble("position", 0.0)
+                var pos = m.optDouble("position", 0.0)
                 val rate = m.optDouble("rate", 1.0).toFloat()
-                val needSeek = Math.abs(player.currentPos() - pos) > SOFT_DRIFT
+                val stateChanged = roomState != state
+                val local = player.currentPos()
+                // 位置防护：0 或非法值只在"本来就在片头"时才相信。
+                // 对端偶尔会把读不到 time-pos 的 0 报上来，跟着 seek(0) 就是"跳回片头"。
+                if (pos.isNaN() || pos < 0 || (pos <= 0.05 && local > 5.0)) {
+                    pos = local
+                }
+                // 状态变化时严一点（人对播放/暂停敏感），纯位置同步时松一点（避免频繁 seek 卡顿）
+                val threshold = if (stateChanged) 0.5 else 1.0
+                val needSeek = Math.abs(local - pos) > threshold
                 roomState = state
-                suppress(1500)
+                suppress(400)
                 if (needSeek) player.seekTo(pos)
                 if (state == "playing") player.play(pos, rate) else player.pause(pos)
                 listener.onNotice("$operator ${if (state == "playing") "播放了" else "暂停了"} @${fmt(pos)}")
             }
             "forceSeek" -> {
-                val pos = m.optDouble("position", 0.0)
-                suppress(1500)
+                var pos = m.optDouble("position", 0.0)
+                // 纠偏也不能盲从：明显不合理的 0 视为服务端脏数据
+                if (pos.isNaN() || pos < 0 || (pos <= 0.05 && player.currentPos() > 5.0)) {
+                    return
+                }
+                suppress(400)
                 player.seekTo(pos)
                 listener.onNotice("服务器纠偏 → ${fmt(pos)}")
             }
@@ -178,6 +191,8 @@ class SyncEngine(
 
     fun onLocalPause() {
         if (!helloReceived.get() || suppressed()) return
+        // 缓冲/卡顿不是暂停，别把全房间停住
+        if (player.isBuffering()) return
         if (roomState == "paused") return
         roomState = "paused"
         send(Protocol.pause(player.currentPos()))

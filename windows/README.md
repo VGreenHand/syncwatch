@@ -27,4 +27,4 @@ echo 1.2.3.4:8995> server.txt    :: 填你的服务器地址
 
 ## 打包
 
-`打包.bat` → `dist\一起看-windows-v0.2.zip`（含 mpv，免安装）
+`打包.bat` → `dist\一起看-windows-v0.3.zip`（含 mpv，免安装）

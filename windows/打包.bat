@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0"
 
 rem ============================================================
-rem  打包成可分发压缩包：dist\一起看-windows-v0.2.zip
+rem  打包成可分发压缩包：dist\一起看-windows-v0.3.zip
 rem  对方解压后双击「启动观影.bat」即可，无需安装任何东西
 rem ============================================================
 
@@ -25,7 +25,7 @@ if not exist "mpv\mpv.exe" (
 
 set "DIST=%~dp0..\dist"
 if not exist "%DIST%" mkdir "%DIST%"
-set "ZIP=%DIST%\一起看-windows-v0.2.zip"
+set "ZIP=%DIST%\一起看-windows-v0.3.zip"
 if exist "%ZIP%" del /q "%ZIP%"
 
 echo [1/2] 收集文件到临时目录...

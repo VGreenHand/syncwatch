@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -83,12 +84,13 @@ func (c *MpvClient) readLoop() {
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
 		var ev struct {
-			Event     string          `json:"event"`
-			ID        int             `json:"id"`
-			Name      string          `json:"name"`
-			Data      json.RawMessage `json:"data"`
-			RequestID int             `json:"request_id"`
-			Error     string          `json:"error"`
+			Event        string          `json:"event"`
+			ID           int             `json:"id"`
+			Name         string          `json:"name"`
+			Data         json.RawMessage `json:"data"`
+			RequestID    int             `json:"request_id"`
+			Error        string          `json:"error"`
+			PlaybackTime float64         `json:"playback-time"`
 		}
 		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
 			continue
@@ -98,7 +100,7 @@ func (c *MpvClient) readLoop() {
 			continue
 		}
 		if ev.Event == "seek" {
-			handleMpvSeekEvent()
+			handleMpvSeekEvent(ev.PlaybackTime)
 			continue
 		}
 		if ev.Event == "end-file" {
@@ -152,13 +154,25 @@ func (c *MpvClient) get(prop string) (json.RawMessage, error) {
 }
 
 func (c *MpvClient) getFloat(prop string) float64 {
+	v, _ := c.getFloatOK(prop)
+	return v
+}
+
+// getFloatOK 与 getFloat 的区别：取不到值时明确返回 false。
+//
+// 这是 v0.3 修的关键 bug —— 原来 mpv 返回 {"data":null} 或 get_property 超时，
+// json.Unmarshal 都会得到 0 且不报错，于是"当前位置"被当成 0 广播出去，
+// 对端发现偏差几十秒，直接 seekTo(0)，表现为"时不时跳回片头"。
+func (c *MpvClient) getFloatOK(prop string) (float64, bool) {
 	raw, err := c.get(prop)
-	if err != nil {
-		return 0
+	if err != nil || len(raw) == 0 || string(raw) == "null" {
+		return 0, false
 	}
 	var f float64
-	json.Unmarshal(raw, &f)
-	return f
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return 0, false
+	}
+	return f, true
 }
 
 func (c *MpvClient) getString(prop string) string {
@@ -181,9 +195,6 @@ var (
 	roomCode string
 	filePath string
 
-	suppressMu    sync.Mutex
-	suppressUntil time.Time
-
 	// 收到 hello 前忽略本地事件（避免 mpv 初始 --pause 触发误广播）
 	helloOnce sync.Once
 	helloRecv atomic.Bool
@@ -195,19 +206,21 @@ var (
 
 	// 本地是否处于"用户暂停"状态，用于 memberState
 	lastCachePause bool
+
+	// 最近一次可信的播放位置。取不到当前值时就报它，绝不报 0。
+	lastGoodPos atomic.Value // float64
+
+	// 我们自己下发的 pause 会让 mpv 产生事件，短窗口内视为回声不回报。
+	progPauseUntil atomic.Int64 // unix 毫秒
+
+	// 我们自己下发的 seek 的抑制窗口。mpv 一次 seek 会连发多个 seek 事件
+	// （实测还会带一个 playback-time=0 的中间态），所以只能用"整段忽略"，
+	// 单个标记匹配堵不住——放过去就是把全房间拉回片头。
+	progSeekUntil atomic.Int64 // unix 毫秒
+
+	// 上次上报过的跳转位置，用来过滤同一位置重复上报（mpv 常连发多条）
+	lastReportedSeek atomic.Value // float64
 )
-
-func suppress(ms int) {
-	suppressMu.Lock()
-	suppressUntil = time.Now().Add(time.Duration(ms) * time.Millisecond)
-	suppressMu.Unlock()
-}
-
-func suppressed() bool {
-	suppressMu.Lock()
-	defer suppressMu.Unlock()
-	return time.Now().Before(suppressUntil)
-}
 
 func sendMsg(m Msg) {
 	wsMu.Lock()
@@ -225,15 +238,27 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 	switch name {
 	case "pause":
 		var paused bool
-		json.Unmarshal(data, &paused)
-		if suppressed() || !helloRecv.Load() {
+		if err := json.Unmarshal(data, &paused); err != nil {
 			return
 		}
-		// 与房间当前状态一致 → 是回声或播放器启动期的延迟事件，不上报
+		if !helloRecv.Load() {
+			return
+		}
+		// 只忽略"我们自己刚下发的 set_property(pause)"造成的回声，
+		// 不再用全局 800ms 时间窗 —— 那会把用户紧跟其后的操作一并吞掉，
+		// 表现为"在 Windows 上点暂停，对方要等好几秒甚至根本不响应"。
+		if time.Now().UnixMilli() < progPauseUntil.Load() {
+			return
+		}
+		// 与房间当前状态一致 → 回声或播放器启动期的延迟事件，不上报
 		if cur, _ := roomState.Load().(string); (paused && cur == "paused") || (!paused && cur == "playing") {
 			return
 		}
-		pos := mpv.getFloat("time-pos")
+		pos, ok := posOrLast()
+		if !ok {
+			log.Printf("%s 读不到播放位置，已跳过本次状态上报（避免把全房间拉回片头）", yellow("[警告]"))
+			return
+		}
 		if paused {
 			roomState.Store("paused")
 			log.Printf("%s 你暂停了 @%.1fs", cyan("[本地]"), pos)
@@ -241,7 +266,10 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 		} else {
 			roomState.Store("playing")
 			log.Printf("%s 你播放了 @%.1fs", cyan("[本地]"), pos)
-			rate := mpv.getFloat("speed")
+			rate, rok := mpv.getFloatOK("speed")
+			if !rok || rate <= 0 {
+				rate = 1.0
+			}
 			sendMsg(Msg{Type: "play", Position: pos, Rate: rate})
 		}
 	case "paused-for-cache":
@@ -262,11 +290,42 @@ func handlePropertyChange(id int, name string, data json.RawMessage) {
 	}
 }
 
-func handleMpvSeekEvent() {
-	if suppressed() || !helloRecv.Load() {
+// handleMpvSeekEvent 处理 mpv 的 seek 事件。
+//
+// 三个必须同时挡住的东西，都是实测踩出来的：
+//  1. 我们执行远端指令造成的跳转，不能回报（否则 A→B→A 回声）；
+//  2. mpv 一次 seek 会连发多条事件，其中可能夹一条 playback-time=0 的中间态，
+//     这种 0 一旦上报，服务端把房间位置改成 0，全房间跳片头；
+//  3. 同一位置连发多次，没必要重复上报。
+//
+// 因此：用 progSeekUntil 整段忽略程序性跳转，位置优先取事件自带的 playback-time
+// （比再查一次 time-pos 准确，seek 未完成时 time-pos 可能还是旧值或 null），
+// 并对 1 秒内的同位置去重。
+func handleMpvSeekEvent(playbackTime float64) {
+	if !helloRecv.Load() {
 		return
 	}
-	pos := mpv.getFloat("time-pos")
+	now := time.Now().UnixMilli()
+	if now < progSeekUntil.Load() {
+		// 程序性跳转期间：只更新可信位置，绝不回报
+		if playbackTime >= 0 && !math.IsNaN(playbackTime) {
+			lastGoodPos.Store(playbackTime)
+		}
+		return
+	}
+	pos := playbackTime
+	if math.IsNaN(pos) || pos < 0 {
+		var ok bool
+		pos, ok = posOrLast()
+		if !ok {
+			return
+		}
+	}
+	if v, ok := lastReportedSeek.Load().(float64); ok && abs(v-pos) < 1.0 {
+		return // 同一位置重复事件
+	}
+	lastReportedSeek.Store(pos)
+	lastGoodPos.Store(pos)
 	log.Printf("%s 你跳转到了 %.1fs", cyan("[本地]"), pos)
 	sendMsg(Msg{Type: "seek", Position: pos})
 }
@@ -276,18 +335,28 @@ func handleMpvSeekEvent() {
 func applyRemoteState(state string, pos, rate float64, reason string) {
 	cur := mpv.getFloat("time-pos")
 	needSeek := abs(cur-pos) > SOFT_DRIFT
+	if pos < 0 {
+		pos = 0
+	}
 	roomState.Store(state)
-	suppress(800)
 	if needSeek {
+		// 开启抑制窗口，覆盖 mpv 一次 seek 连发的多个事件（含 0 中间态）
+		progSeekUntil.Store(time.Now().Add(1500 * time.Millisecond).UnixMilli())
 		mpv.cmd("seek", pos, "absolute+exact")
 	}
 	if state == "playing" {
-		mpv.cmd("set_property", "pause", false)
-		if rate > 0 && rate != mpv.getFloat("speed") {
+		if mpv.getFloat("pause") > 0.5 {
+			progPauseUntil.Store(time.Now().Add(700 * time.Millisecond).UnixMilli())
+			mpv.cmd("set_property", "pause", false)
+		}
+		if rate > 0 && abs(rate-mpv.getFloat("speed")) > 0.01 {
 			mpv.cmd("set_property", "speed", rate)
 		}
 	} else {
-		mpv.cmd("set_property", "pause", true)
+		if mpv.getFloat("pause") < 0.5 {
+			progPauseUntil.Store(time.Now().Add(700 * time.Millisecond).UnixMilli())
+			mpv.cmd("set_property", "pause", true)
+		}
 	}
 	log.Printf("%s %s → %s @%.1fs", magenta("[同步]"), reason, stateLabel(state), pos)
 }
@@ -304,6 +373,25 @@ func abs(f float64) float64 {
 		return -f
 	}
 	return f
+}
+
+// posOrLast 取"可以安全广播出去"的播放位置。
+//
+//  1. 优先向 mpv 查询 time-pos；
+//  2. 查询失败（超时 / 返回 null / mpv 正在精确 seek 顾不上回话）时，
+//     退回最近一次成功读到的值；
+//  3. 连历史值都没有（刚启动）才返回 false，让调用方跳过这次上报。
+//
+// 绝不能在失败时返回 0：对端会认为"对方跳到了片头"，跟着 seekTo(0)。
+func posOrLast() (float64, bool) {
+	if v, ok := mpv.getFloatOK("time-pos"); ok && !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 {
+		lastGoodPos.Store(v)
+		return v, true
+	}
+	if v, ok := lastGoodPos.Load().(float64); ok {
+		return v, true
+	}
+	return 0, false
 }
 
 // ---------- WebSocket 读循环 ----------
@@ -440,8 +528,12 @@ func serverURL() string {
 
 func joinRoom(c *websocket.Conn) {
 	msg := Msg{Type: "join", Name: myName, Password: *passFlag}
-	if *roomFlag != "" {
-		msg.Room = *roomFlag
+	// 必须用 roomCode 而不是 *roomFlag：
+	// 房间码是运行时交互输入的，*roomFlag（命令行参数）通常是空的。
+	// 原来重连时这里传空，服务端就 randomCode() 新建一个房间 ——
+	// 表现为"网络抖一下，进度突然回到片头，而且和对方不在一个房间了"。
+	if roomCode != "" {
+		msg.Room = roomCode
 	}
 	data, _ := json.Marshal(msg)
 	c.WriteMessage(websocket.TextMessage, data)
@@ -600,8 +692,15 @@ func main() {
 	go func() {
 		for {
 			time.Sleep(HEARTBEAT_EVERY)
-			pos := mpv.getFloat("time-pos")
-			rate := mpv.getFloat("speed")
+			pos, ok := posOrLast()
+			if !ok {
+				// 位置不可信时宁可不发，也不要发一个 0 让服务端判成"漂移"
+				continue
+			}
+			rate, rok := mpv.getFloatOK("speed")
+			if !rok || rate <= 0 {
+				rate = 1.0
+			}
 			paused := mpv.getFloat("pause") > 0.5
 			sendMsg(Msg{Type: "heartbeat", Position: pos, Rate: rate})
 			if !paused && !lastCachePause {

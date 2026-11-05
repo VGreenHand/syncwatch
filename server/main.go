@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -19,47 +20,49 @@ import (
 )
 
 const (
-	MAX_MEMBERS   = 5                // 房间人数上限
+	MAX_MEMBERS   = 5 // 房间人数上限
 	SEEK_DEBOUNCE = 120 * time.Millisecond
-	DRIFT_SOFT    = 0.3              // 秒：忽略
-	DRIFT_HARD    = 1.0              // 秒：强制纠偏
+	DRIFT_SOFT    = 0.3 // 秒：忽略
+	DRIFT_HARD    = 1.0 // 秒：强制纠偏
+	// 空房保留时长。原来最后一个成员一离开就删房，断线重连必然回到 0 秒。
+	EMPTY_ROOM_TTL = 15 * time.Minute
 	HEARTBEAT_LATE = 30 * time.Second // 心跳超时踢出
-	PING_PERIOD   = 20 * time.Second
-	PONG_TIMEOUT  = 60 * time.Second
-	RATE_LIMIT    = 40               // 每秒每连接最大消息数(粗略)
-	ROOM_IDLE_TTL = 2 * time.Hour    // 空房间保留时长
+	PING_PERIOD    = 20 * time.Second
+	PONG_TIMEOUT   = 60 * time.Second
+	RATE_LIMIT     = 40            // 每秒每连接最大消息数(粗略)
+	ROOM_IDLE_TTL  = 2 * time.Hour // 空房间保留时长
 )
 
 // ---------- 消息 ----------
 
 type Msg struct {
-	Type     string  `json:"type"`
-	Room     string  `json:"room,omitempty"`
-	Password string  `json:"password,omitempty"`
-	Name     string  `json:"name,omitempty"`
-	Position float64 `json:"position,omitempty"`
-	Rate     float64 `json:"rate,omitempty"`
-	State    string  `json:"state,omitempty"` // playing/paused/buffering (memberState)
-	Operator string  `json:"operator,omitempty"`
-	AnchorMs int64   `json:"anchorMs,omitempty"`
-	Error    string  `json:"error,omitempty"`
-	File     string  `json:"file,omitempty"`
-	Size     int64   `json:"size,omitempty"`
-	Duration float64 `json:"duration,omitempty"`
+	Type     string       `json:"type"`
+	Room     string       `json:"room,omitempty"`
+	Password string       `json:"password,omitempty"`
+	Name     string       `json:"name,omitempty"`
+	Position float64      `json:"position,omitempty"`
+	Rate     float64      `json:"rate,omitempty"`
+	State    string       `json:"state,omitempty"` // playing/paused/buffering (memberState)
+	Operator string       `json:"operator,omitempty"`
+	AnchorMs int64        `json:"anchorMs,omitempty"`
+	Error    string       `json:"error,omitempty"`
+	File     string       `json:"file,omitempty"`
+	Size     int64        `json:"size,omitempty"`
+	Duration float64      `json:"duration,omitempty"`
 	Members  []MemberInfo `json:"members,omitempty"`
-	Reason   string  `json:"reason,omitempty"`
+	Reason   string       `json:"reason,omitempty"`
 	// Created 仅在 hello 中出现：true 表示本次 join 新建了房间，
 	// false 表示加入了一个已存在的房间。客户端用它提示用户
 	// “你输入的房间码不存在，已为你新建房间”，避免误以为进了朋友的房间。
-	Created  bool    `json:"created,omitempty"`
+	Created bool `json:"created,omitempty"`
 }
 
 type MemberInfo struct {
-	Name        string  `json:"name"`
-	State       string  `json:"state"`                  // playing/paused/buffering
-	File        string  `json:"file,omitempty"`
-	Duration    float64 `json:"duration,omitempty"`
-	Online      bool    `json:"online"`
+	Name     string  `json:"name"`
+	State    string  `json:"state"` // playing/paused/buffering
+	File     string  `json:"file,omitempty"`
+	Duration float64 `json:"duration,omitempty"`
+	Online   bool    `json:"online"`
 }
 
 // ---------- 房间与成员 ----------
@@ -79,26 +82,40 @@ type Member struct {
 	quota    int     // 简单限流
 	quotaAt  time.Time
 	closed   sync.Once
+	// 上一次心跳是否已经超阈值。连续两次才纠偏，单次抖动不折腾用户。
+	driftWarned bool
 }
 
 type Room struct {
-	mu       sync.Mutex
-	code     string
-	password string
-	state    string // playing / paused
-	position float64 // anchor 时刻的进度(秒)
-	anchor   time.Time
-	rate     float64
-	members  map[*Member]bool
-	lastSeek time.Time
+	mu        sync.Mutex
+	code      string
+	password  string
+	state     string  // playing / paused
+	position  float64 // anchor 时刻的进度(秒)
+	anchor    time.Time
+	rate      float64
+	members   map[*Member]bool
+	lastSeek  time.Time
 	seekTimer *time.Timer
-	created  time.Time
+	created   time.Time
+	// 房间变空的时刻。空房不立即销毁——手机切后台、WiFi 抖动都会短暂断开，
+	// 立刻删房会让重连的客户端拿到一个全新房间（进度 0），表现为"跳回片头"。
+	emptySince time.Time
 }
 
 var (
 	hubMu sync.Mutex
 	rooms = map[string]*Room{}
 )
+
+// sanitizePos 过滤明显异常的位置：NaN / Inf / 负数 / 超过 24 小时。
+// 这是"跳回片头"的最后一道防线——即使某个客户端报错，也不会污染房间状态。
+func sanitizePos(p float64) (float64, bool) {
+	if math.IsNaN(p) || math.IsInf(p, 0) || p < 0 || p > 24*3600 {
+		return 0, false
+	}
+	return p, true
+}
 
 // 当前权威进度
 func (r *Room) currentPos() float64 {
@@ -155,15 +172,20 @@ func (m *Member) close(reason string) {
 	})
 }
 
+// cleanupRoom 只把房间标记为"空"，不销毁。
+//
+// v0.3 之前是最后一个成员一离开就 delete(rooms, code)，于是任何一次短暂断线
+// （手机切后台、WiFi 抖动、心跳超时）都会让重连的客户端拿到一个全新房间：
+// 房间码失效、进度归零，用户看到的就是"时不时跳回片头"。
+// 现在交给 reaper 在 EMPTY_ROOM_TTL 后回收，房间状态可以跨断线保留。
 func cleanupRoom(r *Room) {
-	hubMu.Lock()
-	defer hubMu.Unlock()
 	r.mu.Lock()
-	empty := len(r.members) == 0
-	r.mu.Unlock()
-	if empty {
-		delete(rooms, r.code)
+	if len(r.members) == 0 {
+		r.emptySince = time.Now()
+	} else {
+		r.emptySince = time.Time{}
 	}
+	r.mu.Unlock()
 }
 
 // ---------- 房间操作 ----------
@@ -300,23 +322,38 @@ func (m *Member) readLoop() {
 		m.room.mu.Lock()
 		switch msg.Type {
 		case "play":
+			// 位置写进房间权威状态前必须过关：客户端可能因为读不到 time-pos
+			// 而报一个 0 或 NaN 上来，一旦落库，全房间就被拽到片头。
+			if p, ok := sanitizePos(msg.Position); ok {
+				m.room.position = p
+				m.room.anchor = time.Now()
+			} else {
+				log.Printf("[room %s] 丢弃异常位置 %v（play by %s）", m.room.code, msg.Position, m.name)
+			}
 			m.room.state = "playing"
-			m.room.position = msg.Position
-			m.room.anchor = time.Now()
-			if msg.Rate > 0 {
+			if msg.Rate > 0 && msg.Rate < 8 {
 				m.room.rate = msg.Rate
 			}
 			m.state = "playing"
 			m.broadcastSyncLocked(m)
 		case "pause":
+			if p, ok := sanitizePos(msg.Position); ok {
+				m.room.position = p
+				m.room.anchor = time.Now()
+			} else {
+				log.Printf("[room %s] 丢弃异常位置 %v（pause by %s）", m.room.code, msg.Position, m.name)
+			}
 			m.room.state = "paused"
-			m.room.position = msg.Position
-			m.room.anchor = time.Now()
 			m.state = "paused"
 			m.broadcastSyncLocked(m)
 		case "seek":
+			p, ok := sanitizePos(msg.Position)
+			if !ok {
+				log.Printf("[room %s] 丢弃异常位置 %v（seek by %s）", m.room.code, msg.Position, m.name)
+				break
+			}
 			// 防抖：120ms 窗口内只广播最后一次
-			m.room.position = msg.Position
+			m.room.position = p
 			m.room.anchor = time.Now()
 			m.state = m.room.state
 			debounced := time.Since(m.room.lastSeek) < SEEK_DEBOUNCE
@@ -330,7 +367,14 @@ func (m *Member) readLoop() {
 			}
 		case "heartbeat":
 			m.lastHB = time.Now()
-			m.lastPos = msg.Position
+			// 心跳位置只用于漂移判定，脏数据同样要挡：否则一个 0 会让服务端
+			// 认为该成员落后了几十秒，进而给它发 forceSeek。
+			if p, ok := sanitizePos(msg.Position); ok {
+				m.lastPos = p
+			} else {
+				m.room.mu.Unlock()
+				continue
+			}
 			if msg.Rate > 0 {
 				m.rate = msg.Rate
 			}
@@ -382,6 +426,7 @@ func (m *Member) handleJoin(msg Msg) string {
 		}
 	}
 	r.members[m] = true
+	r.emptySince = time.Time{} // 有人回来了，取消空置计时
 	m.room, m.name = r, msg.Name
 	m.state = "paused"
 	state, pos, anchor, rate := r.snapshot()
@@ -416,18 +461,33 @@ func (m *Member) emitSync(operator *Member) {
 	m.room.mu.Unlock()
 }
 
-// 漂移检测：偏差 > DRIFT_HARD 广播 forceSeek
+// 漂移检测：偏差 > DRIFT_HARD 时只纠正该成员。
+//
+// 原实现有三个问题，都是用户能直接感受到的：
+//  1. 单次心跳就纠偏 → 解码卡顿一下就被 seek，画面一顿一顿；
+//  2. broadcast 给全房间 → 一个成员的偏差把所有人都拽走；
+//  3. 顺手重置 r.position/r.anchor → 房间权威进度被个别成员的异常值污染。
 func (r *Room) checkDriftLocked(m *Member) {
-	expected := r.currentPos()
 	if r.state != "playing" {
+		m.driftWarned = false
 		return
 	}
+	expected := r.currentPos()
 	drift := m.lastPos - expected
-	if drift > DRIFT_HARD || drift < -DRIFT_HARD {
-		pos := r.currentPos()
-		r.position, r.anchor = pos, time.Now()
-		r.broadcast(nil, Msg{Type: "forceSeek", Position: pos, Operator: "server(drift)"})
-		log.Printf("[room %s] drift %.2fs by %s -> forceSeek %.1f", r.code, drift, m.name, pos)
+	if drift <= DRIFT_HARD && drift >= -DRIFT_HARD {
+		m.driftWarned = false
+		return
+	}
+	if !m.driftWarned {
+		// 第一次只记标记，下一次心跳仍偏才动手
+		m.driftWarned = true
+		return
+	}
+	data, _ := json.Marshal(Msg{Type: "forceSeek", Position: expected, Operator: "server(drift)"})
+	select {
+	case m.send <- data:
+		log.Printf("[room %s] drift %.2fs by %s -> forceSeek %.1f（仅纠正该成员）", r.code, drift, m.name, expected)
+	default:
 	}
 }
 
@@ -435,15 +495,16 @@ func (r *Room) checkDriftLocked(m *Member) {
 
 func reaper() {
 	for {
-		time.Sleep(5 * time.Minute)
+		time.Sleep(time.Minute)
 		hubMu.Lock()
 		for code, r := range rooms {
 			r.mu.Lock()
 			empty := len(r.members) == 0
-			old := time.Since(r.created) > ROOM_IDLE_TTL
+			expired := empty && !r.emptySince.IsZero() && time.Since(r.emptySince) > EMPTY_ROOM_TTL
 			r.mu.Unlock()
-			if empty && old {
+			if expired {
 				delete(rooms, code)
+				log.Printf("[room %s] 空置超过 %s，已回收", code, EMPTY_ROOM_TTL)
 			}
 		}
 		hubMu.Unlock()
@@ -466,7 +527,7 @@ func main() {
 	})
 	http.HandleFunc("/ws", serveWS)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("syncwatch-server v0.2 ok"))
+		w.Write([]byte("syncwatch-server v0.3 ok"))
 	})
 
 	log.Printf("syncwatch-server listening on :%s", port)

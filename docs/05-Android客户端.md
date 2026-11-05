@@ -4,7 +4,7 @@ Kotlin + Media3(ExoPlayer) + OkHttp WebSocket，minSdk 24（Android 7.0+），�
 
 ## 安装
 
-1. 把 `dist\一起看-android-v0.2.apk` 传到手机（微信文件传输 / 数据线 / 网盘均可）
+1. 把 `dist\一起看-android-v0.3.apk` 传到手机（微信文件传输 / 数据线 / 网盘均可）
 2. 点击安装，首次提示"未知来源应用"时允许
 3. 系统要求：Android 7.0 及以上
 
@@ -66,7 +66,7 @@ build-apk.bat
 1. 按 `JAVA_HOME` → `F:\android-tools\jdk17*` 顺序自动找 JDK 17；
 2. 按 `ANDROID_HOME` → `F:\android-tools\sdk` 找 SDK，并写入临时 `local.properties`；
 3. **把工程复制到纯 ASCII 路径**（`%TEMP%\syncwatch-android-build`）再编译 —— AGP 不接受含中文的项目路径，这是踩过的坑；
-4. 产物拷到 `dist\一起看-android-v0.2.apk`。
+4. 产物拷到 `dist\一起看-android-v0.3.apk`。
 
 ### 手动构建
 

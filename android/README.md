@@ -3,7 +3,7 @@
 ## 构建
 
 ```bat
-build-apk.bat        :: 产出 ..\dist\一起看-android-v0.2.apk
+build-apk.bat        :: 产出 ..\dist\一起看-android-v0.3.apk
 ```
 
 依赖 JDK 17 + Android SDK（platform 34 / build-tools 34.0.0）+ Gradle 8.7，

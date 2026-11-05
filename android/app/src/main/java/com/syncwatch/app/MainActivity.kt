@@ -118,7 +118,15 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     @SuppressLint("UnsafeOptInUsageError")
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            engine?.let { if (isPlaying) it.onLocalPlay() else it.onLocalPause() }
+            val e = engine ?: return
+            if (isPlaying) {
+                e.onLocalPlay()
+            } else if (!player.playWhenReady) {
+                // 只有"用户真的按了暂停"（playWhenReady=false）才算暂停。
+                // isPlaying 在缓冲、切集、seek 期间都会变成 false，
+                // 原来无条件上报会把整个房间一起暂停掉。
+                e.onLocalPause()
+            }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
