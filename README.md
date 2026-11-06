@@ -352,12 +352,12 @@ current = position + (now - anchor) * rate      // 仅在 playing 时累加
 |---|---|---|
 | 服务端二进制 | `cd server && go build -o syncwatch-server .` | 本地 / CI（linux amd64 + arm64） |
 | 图形版 exe | `gui\build.bat`（= `wails build -platform windows/amd64`） | **仅本地** |
-| 图形版 zip | `gui\打包.bat` → `dist\一起看-windows-v0.5.1.zip` | **仅本地** |
+| 图形版 zip | `gui\打包.bat` → `dist\一起看-windows-v0.5.1.zip` | 本地构建；公开版手动附到 Release |
 | 控制台版 zip | `windows\build.bat` + `windows\打包.bat` | 本地 / CI |
-| Android APK | `android\build-apk.bat` → `dist\一起看-android-v0.4.apk` | 本地 / CI |
+| Android APK | `android\build-apk.bat` → `dist\一起看-android-v0.5.1.apk` | 本地 / CI |
 | 线上部署 | `server\deploy.sh`（rsync + docker compose） | 仅本地 |
 
-**打 tag 自动发布**：推 `v0.5` 这类 tag 后，GitHub Actions 编译服务端（amd64 / arm64）、控制台版 Windows 包、Android APK，并在 Releases 页面建版本。**图形版不在 CI 范围内**（workflow 里没有 Node + Wails 步骤），要发就本地打包后手动传上去。
+**打 tag 自动发布**：推 `v0.5.1` 这类 tag 后，GitHub Actions 编译服务端（amd64 / arm64）、控制台版 Windows 包、Android APK，并在 Releases 页面建版本。**图形版不在 CI 范围内**（workflow 里没有 Node + Wails 步骤），维护者本地打包成 `syncwatch-windows-gui-<版本>.zip` 后手动附上去——这份包不含 `server.txt`。
 
 发版时版本号散在 7 处，漏一处就会出现"关于里显示 v0.4、包名却是 v0.5"：
 
@@ -479,7 +479,7 @@ v0.5.1 起，如果填的房间码在服务器上不存在（打错、或空房�
 - `v0.3` 房间跨断线保留（15 分钟）；漂移纠偏只发给漂移者；Android 缓冲状态不再被误判成暂停；服务端位置参数校验
 - `v0.4` 双端实机联调：修复 mpv 布尔属性解析错误导致的"远端放音本端不动"、seek 事件取错位置导致的"跳回片头"；成员状态实时上报；纠偏阈值分档
 - `v0.5` Windows 图形客户端：单窗口一体化（视频内嵌、房间码可复制、成员面板、全屏控制条自动隐藏、片源时长提示）；**协议与服务端零改动**。分发包目前需本地打包，CI 仍只产控制台版
-- `v0.5.1` 修「两台电脑都显示已连接却互相看不到」：根因是图形版的自动化联调入口会把 `127.0.0.1` 写进本地配置，而配置优先级高于分发包自带的 `server.txt`，于是房主连本机、朋友连公网，两边各建了一个同码房间。同时修：WS 并发写崩溃、断线不重连；加入不存在的房间码改为阻断式提示，回环地址与服务器地址在界面上明示；新增单击画面暂停/播放、方向键控进度与音量
+- `v0.5.1` 修「两台电脑都显示已连接却互相看不到」：根因是图形版的自动化联调入口会把 `127.0.0.1` 写进本地配置，而配置优先级高于分发包自带的 `server.txt`，于是房主连本机、朋友连公网，两边各建了一个同码房间。同时修：WS 并发写崩溃、断线不重连；加入不存在的房间码改为阻断式提示，回环地址与服务器地址在界面上明示；新增单击画面暂停/播放、方向键控进度与音量。已发布，Releases 里可下载图形版包 `syncwatch-windows-gui-v0.5.1.zip`
 - `v0.6`（计划）房主踢人、房间锁、Android 前台 Service
 - `v0.7`（计划）语音 / 文字聊天（纯信令，成本极低）
 - `v1.0`（计划）一体化安装包、自动更新
