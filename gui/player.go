@@ -223,7 +223,9 @@ func (p *Player) command(args ...interface{}) error {
 	return p.send(map[string]interface{}{"command": args})
 }
 
-func (p *Player) getFloat(prop string) (float64, bool) {
+// getRaw 发 get_property 并等回包。超时或出错一律 ok=false——
+// 绝不返回 0 冒充有效值，否则一个 0 会被当成"跳到片头"广播出去（v0.3 的坑）。
+func (p *Player) getRaw(prop string) (json.RawMessage, bool) {
 	p.pendMu.Lock()
 	id := p.nextID + 1
 	p.nextID++
@@ -231,26 +233,62 @@ func (p *Player) getFloat(prop string) (float64, bool) {
 	p.pending[id] = ch
 	p.pendMu.Unlock()
 
+	drop := func() {
+		p.pendMu.Lock()
+		delete(p.pending, id)
+		p.pendMu.Unlock()
+	}
+
 	if err := p.send(map[string]interface{}{
 		"command":    []interface{}{"get_property", prop},
 		"request_id": id,
 	}); err != nil {
-		return 0, false
+		drop()
+		return nil, false
 	}
 	select {
 	case raw := <-ch:
-		var f float64
-		if json.Unmarshal(raw, &f) == nil {
-			return f, true
+		if len(raw) == 0 || string(raw) == "null" {
+			return nil, false
 		}
-		return 0, false
+		return raw, true
 	case <-time.After(2 * time.Second):
+		drop() // 不回包时也要把 pending 清掉，否则长时间播放会越攒越多
+		return nil, false
+	}
+}
+
+func (p *Player) getFloat(prop string) (float64, bool) {
+	raw, ok := p.getRaw(prop)
+	if !ok {
 		return 0, false
 	}
+	var f float64
+	if json.Unmarshal(raw, &f) != nil {
+		return 0, false
+	}
+	return f, true
+}
+
+// getBool 读布尔属性。mpv 的 pause / seeking 是 JSON 布尔，
+// 用 getFloat 去解会失败并静默得到 0（= false），v0.4 踩过这个坑。
+func (p *Player) getBool(prop string) (bool, bool) {
+	raw, ok := p.getRaw(prop)
+	if !ok {
+		return false, false
+	}
+	var b bool
+	if json.Unmarshal(raw, &b) != nil {
+		return false, false
+	}
+	return b, true
 }
 
 func (p *Player) Play() error  { return p.command("set_property", "pause", false) }
 func (p *Player) Pause() error { return p.command("set_property", "pause", true) }
+
+// IsPaused 问 mpv 真实暂停状态（界面点击播放/暂停时以此为准）。
+func (p *Player) IsPaused() (bool, bool) { return p.getBool("pause") }
 
 func (p *Player) Seek(pos float64) error {
 	return p.command("seek", strconv.FormatFloat(pos, 'f', 3, 64), "absolute+exact")

@@ -3,12 +3,12 @@ setlocal
 cd /d "%~dp0"
 
 rem ============================================================
-rem  打包成可分发压缩包：dist\一起看-windows-v0.5.zip
+rem  打包成可分发压缩包：dist\一起看-windows-v0.5.1.zip
 rem  内含 GUI 主程序 + mpv（从 windows\mpv 复用，不重复下载）
 rem  解压后双击 开始一起看.bat 即可，无需安装任何东西
 rem ============================================================
 
-set "VER=v0.5"
+set "VER=v0.5.1"
 set "DIST=%~dp0..\dist"
 set "MPV_SRC=%~dp0..\windows\mpv"
 set "STAGE=%TEMP%\syncwatch-gui-pkg"

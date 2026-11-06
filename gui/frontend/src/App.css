@@ -718,3 +718,57 @@ input, button, textarea { font-family: inherit; }
 ::-webkit-scrollbar-thumb { background: #2f3542; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #3b4250; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- v0.5.1：点击画面 / OSD / 服务器地址提示 ---------- */
+
+/* 视频区可点：单击暂停/播放，双击全屏 */
+.video-wrap.clickable { cursor: pointer; }
+
+.osd {
+  position: absolute;
+  left: 50%;
+  bottom: 22%;
+  transform: translateX(-50%);
+  z-index: 9;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(6, 7, 10, 0.72);
+  color: #fff;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
+/* 顶栏里的服务器地址：填错地址时这是第一个能看出问题的地方 */
+.srv-chip {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.srv-chip.warn { color: var(--state-warning); }
+.warn-text { color: var(--state-warning); }
+
+.members-foot {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.members-tip.danger {
+  padding: 2px 0 0;
+  border-top: none;
+  color: var(--state-error);
+}
+
+.input-warn { border-color: var(--state-error) !important; }
+.hint-line { font-size: 12px; color: var(--text-secondary); }
+
+.drawer-foot {
+  justify-content: space-between;
+  align-items: center;
+}

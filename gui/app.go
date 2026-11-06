@@ -6,7 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +19,9 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// AppVersion 显示在设置面板底部；发版时与 打包.bat 的文件名一起改。
+const AppVersion = "v0.5.1"
 
 // App 是暴露给前端的方法集合。
 // 前端不拼协议消息、不直接操作 mpv，所有动作都从这里进。
@@ -34,9 +40,10 @@ type App struct {
 	lastPos   float64
 	lastDur   float64
 	isPaused  bool
+	volume    float64
 	roomState string // 已应用到播放器的房间状态，用于识别回声
 	roomCode  string
-	connState string // idle / connecting / connected / disconnected
+	connState string // idle / connecting / connected / reconnecting / disconnected
 	fileSent  bool
 	videoName string
 	videoSize int64
@@ -50,7 +57,7 @@ type Config struct {
 	LastVideo string `json:"lastVideo"`
 }
 
-func NewApp() *App { return &App{connState: "idle"} }
+func NewApp() *App { return &App{connState: "idle", volume: 100} }
 
 // logf 把诊断信息写到 %TEMP%\syncwatch-gui.log。
 // GUI 程序没有控制台，出问题时这是唯一能看到内部状态的地方。
@@ -68,24 +75,101 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.cfg = loadConfig()
 
+	// 调试 / 自动化模式（设置了 SYNCWATCH_AUTO_VIDEO）不读也不写用户配置：
+	// 以前这条路径会 SaveConfig 一个 127.0.0.1 进去，分发包自带 server.txt
+	// 的公网地址被它顶掉，用户打开就只连到本机，于是"两台电脑互相看不到"。
+	if a.debugMode() {
+		a.cfg = Config{}
+		if v := os.Getenv("SYNCWATCH_SERVER"); v != "" {
+			a.cfg.Server = normalizeServer(v)
+		} else {
+			a.cfg.Server = "127.0.0.1:18998"
+		}
+		logf("调试模式: 忽略并禁用配置文件，server=%s", a.cfg.Server)
+		return
+	}
+
 	// 分发包可以在 exe 同目录放一个 server.txt 预置服务器地址，
 	// 这样把包发给朋友，对方打开就能连，不用手填。
 	// 用户自己在设置里改过的地址（config.json）优先级更高。
-	if a.cfg.Server == "" {
-		if exe, err := os.Executable(); err == nil {
-			dir := filepath.Dir(exe)
-			for _, name := range []string{"server.txt"} {
-				if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
-					if v := strings.TrimSpace(string(b)); v != "" {
-						a.cfg.Server = v
-						logf("从 %s 读取服务器地址: %s", name, v)
-						break
-					}
-				}
-			}
+	fileServer := readServerFile()
+
+	a.cfg.Server = normalizeServer(a.cfg.Server)
+	switch {
+	case a.cfg.Server == "" && fileServer != "":
+		a.cfg.Server = fileServer
+		logf("服务器地址取自 server.txt: %s", fileServer)
+	case isLoopbackAddr(a.cfg.Server) && fileServer != "" && !isLoopbackAddr(fileServer):
+		// v0.5.1 修：历史版本的调试入口会把 127.0.0.1 写进 config.json，
+		// 而 config 的优先级高于 server.txt —— 于是分发包明明带着公网地址，
+		// 用户却连到了自己机器上的服务端。两个人各自在"自己的服务器"上
+		// 建了同名房间，表现就是"都显示已连接，却互相看不到、操作也传不过去"。
+		// 这里做一次自愈：配置是回环地址、而分发包给了公网地址时，改用后者。
+		logf("配置里的 %s 是回环地址（只有本机能连），改用 server.txt 的 %s", a.cfg.Server, fileServer)
+		a.cfg.Server = fileServer
+		if err := saveConfigFile(a.cfg); err != nil {
+			logf("回写配置失败: %v", err)
 		}
 	}
+	logf("启动: version=%s server=%q name=%q", AppVersion, a.cfg.Server, a.cfg.Name)
 }
+
+// debugMode 判断是否处于自动化联调运行（环境变量由联调脚本设置）。
+func (a *App) debugMode() bool { return os.Getenv("SYNCWATCH_AUTO_VIDEO") != "" }
+
+// readServerFile 读 exe 同目录的 server.txt（一行 host:port）。
+func readServerFile() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "server.txt"))
+	if err != nil {
+		return ""
+	}
+	return normalizeServer(string(b))
+}
+
+// normalizeServer 统一地址写法：容忍用户把 ws:// 或 /ws 一起粘进来。
+func normalizeServer(s string) string {
+	s = strings.TrimSpace(s)
+	for _, p := range []string{"ws://", "wss://", "http://", "https://"} {
+		if len(s) >= len(p) && strings.EqualFold(s[:len(p)], p) {
+			s = s[len(p):]
+			break
+		}
+	}
+	s = strings.TrimSuffix(s, "/ws")
+	s = strings.TrimSuffix(s, "/")
+	return strings.TrimSpace(s)
+}
+
+// isLoopbackAddr 判断是不是"只有本机能连"的地址。
+// 填成这种地址时，朋友永远连不上，界面要明确警告。
+func isLoopbackAddr(addr string) bool {
+	addr = normalizeServer(addr)
+	if addr == "" {
+		return false
+	}
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsUnspecified()
+	}
+	return false
+}
+
+// Version 供界面显示（设置面板底部）。
+func (a *App) Version() string { return AppVersion }
 
 // domReady 在页面加载完成后执行：此时 Wails 主窗口一定存在。
 func (a *App) domReady(ctx context.Context) {
@@ -108,10 +192,16 @@ func (a *App) LogMsg(s string) { logf("[ui] %s", s) }
 // DebugIntent 仅供自动化联调：从环境变量读取"自动载片 + 自动进房"的意图。
 // 正常使用不会设置这些变量，所以对用户没有影响。
 func (a *App) DebugIntent() map[string]string {
+	a.mu.Lock()
+	server := a.cfg.Server
+	a.mu.Unlock()
 	return map[string]string{
-		"video": os.Getenv("SYNCWATCH_AUTO_VIDEO"),
-		"room":  os.Getenv("SYNCWATCH_AUTO_ROOM"),
-		"name":  os.Getenv("SYNCWATCH_AUTO_NAME"),
+		"video":  os.Getenv("SYNCWATCH_AUTO_VIDEO"),
+		"room":   os.Getenv("SYNCWATCH_AUTO_ROOM"),
+		"name":   os.Getenv("SYNCWATCH_AUTO_NAME"),
+		"server": server,
+		"seek":   os.Getenv("SYNCWATCH_AUTO_SEEK"),
+		"toggle": os.Getenv("SYNCWATCH_AUTO_TOGGLE"),
 	}
 }
 
@@ -190,6 +280,14 @@ func loadConfig() Config {
 	return c
 }
 
+func saveConfigFile(c Config) error {
+	if err := os.MkdirAll(filepath.Dir(configPath()), 0o755); err != nil {
+		return err
+	}
+	data, _ := json.MarshalIndent(c, "", "  ")
+	return os.WriteFile(configPath(), data, 0o644)
+}
+
 func (a *App) GetConfig() Config {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -199,36 +297,53 @@ func (a *App) GetConfig() Config {
 func (a *App) SaveConfig(c Config) error {
 	a.mu.Lock()
 	if c.Server != "" {
-		a.cfg.Server = strings.TrimSpace(c.Server)
+		a.cfg.Server = normalizeServer(c.Server)
 	}
 	if c.Name != "" {
 		a.cfg.Name = c.Name
 	}
+	if c.LastVideo != "" {
+		a.cfg.LastVideo = c.LastVideo
+	}
 	saved := a.cfg
 	a.mu.Unlock()
 
-	if err := os.MkdirAll(filepath.Dir(configPath()), 0o755); err != nil {
-		return err
+	logf("保存配置: server=%q name=%q", saved.Server, saved.Name)
+	if a.debugMode() {
+		return nil // 联调模式只改内存，不落盘
 	}
-	data, _ := json.MarshalIndent(saved, "", "  ")
-	return os.WriteFile(configPath(), data, 0o644)
+	return saveConfigFile(saved)
 }
 
-// PingServer 快速检查服务器是否可达。
+// PingServer 检查服务器是否可达。
+// 只打 GET /health，不再 join 一个临时房间——
+// 老实现每次点"测试连接"都会在服务器上留下一个空房间（15 分钟后才回收）。
 func (a *App) PingServer(server string) map[string]interface{} {
-	server = strings.TrimSpace(server)
+	server = normalizeServer(server)
 	if server == "" {
 		return map[string]interface{}{"ok": false, "message": "未填写服务器地址"}
 	}
+	client := &http.Client{Timeout: 5 * time.Second}
 	start := time.Now()
-	sc := newSyncClient(nil, nil)
-	err := sc.Connect(server, "PING01", "ping", "")
+	resp, err := client.Get("http://" + server + "/health")
 	if err != nil {
 		return map[string]interface{}{"ok": false, "message": "连接失败：" + err.Error()}
 	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 	ms := time.Since(start).Milliseconds()
-	sc.Close()
-	return map[string]interface{}{"ok": true, "message": fmt.Sprintf("连接正常（%d ms）", ms), "ms": ms}
+	if resp.StatusCode != http.StatusOK {
+		return map[string]interface{}{"ok": false, "message": fmt.Sprintf("服务器返回 HTTP %d", resp.StatusCode)}
+	}
+	msg := fmt.Sprintf("连接正常（%d ms）", ms)
+	if isLoopbackAddr(server) {
+		msg += "。注意：这是本机回环地址，只有这台电脑能连，朋友连不上"
+	}
+	return map[string]interface{}{
+		"ok": true, "ms": ms, "message": msg,
+		"loopback": isLoopbackAddr(server),
+		"body":     strings.TrimSpace(string(body)),
+	}
 }
 
 // ---------- 视频 ----------
@@ -371,6 +486,10 @@ func (a *App) startSync(server, room, name, password string) error {
 	a.connState = "connecting"
 	a.mu.Unlock()
 
+	logf("连接: server=%s room=%q name=%s loopback=%v", server, room, name, isLoopbackAddr(server))
+	if isLoopbackAddr(server) {
+		logf("警告: %s 是回环地址，只有本机能连；如果朋友不在同一台电脑，双方会各自连到不同的服务器", server)
+	}
 	wailsruntime.EventsEmit(a.ctx, "room:connecting", map[string]interface{}{"room": room})
 	if err := sc.Connect(server, room, name, password); err != nil {
 		a.mu.Lock()
@@ -465,6 +584,8 @@ func (a *App) GetState() map[string]interface{} {
 	sc := a.sync
 	name := a.videoName
 	size := a.videoSize
+	server := a.cfg.Server
+	vol := a.volume
 	a.mu.Unlock()
 
 	if p != nil {
@@ -485,11 +606,15 @@ func (a *App) GetState() map[string]interface{} {
 		"position":  pos,
 		"duration":  dur,
 		"paused":    paused,
+		"volume":    vol,
 		"room":      room,
 		"conn":      conn,
 		"members":   members,
 		"videoName": name,
 		"videoSize": size,
+		"server":    server,
+		"loopback":  isLoopbackAddr(server),
+		"version":   AppVersion,
 	}
 }
 
@@ -503,34 +628,60 @@ func (a *App) TogglePlay() (bool, error) {
 	if p == nil {
 		return paused, fmt.Errorf("播放器未就绪")
 	}
+	// 以 mpv 的真实状态为准：a.isPaused 只是属性事件的缓存，可能慢一拍，
+	// 连续点两下时会导致"看起来没反应"。
+	if v, ok := p.IsPaused(); ok {
+		paused = v
+	}
 	if paused {
-		a.setPaused(false)
-		pos, _ := p.Position()
+		pos := a.knownPos()
 		rate := 1.0
 		if r, ok := p.getFloat("speed"); ok && r > 0 {
 			rate = r
 		}
+		a.setPaused(false)
 		p.Play()
 		a.reportPlay(pos, rate)
+		logf("[本地] 播放 @%.2fs", pos)
 		return false, nil
 	}
+	pos := a.knownPos()
 	a.setPaused(true)
-	pos, _ := p.Position()
 	p.Pause()
 	a.reportPause(pos)
+	logf("[本地] 暂停 @%.2fs", pos)
 	return true, nil
 }
 
-func (a *App) Seek(pos float64) error {
-	if pos < 0 {
-		pos = 0
+// knownPos 取一个"可以安全广播"的位置：优先问 mpv，取不到退回最后一次事件里的值，
+// 都没有就返回 0（只有刚启动才会出现，此时房间状态本来就是 paused@0）。
+func (a *App) knownPos() float64 {
+	a.mu.Lock()
+	p := a.player
+	last := a.lastPos
+	a.mu.Unlock()
+	if p != nil {
+		if v, ok := p.Position(); ok && v >= 0 {
+			return v
+		}
 	}
+	return last
+}
+
+func (a *App) Seek(pos float64) error {
 	a.mu.Lock()
 	p := a.player
 	sc := a.sync
+	dur := a.lastDur
 	a.mu.Unlock()
 	if p == nil {
 		return fmt.Errorf("播放器未就绪")
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	if dur > 0 && pos > dur {
+		pos = dur
 	}
 	if err := p.Seek(pos); err != nil {
 		return err
@@ -538,6 +689,7 @@ func (a *App) Seek(pos float64) error {
 	if sc != nil {
 		sc.ReportSeek(pos)
 	}
+	logf("[本地] 跳转到 %.2fs", pos)
 	return nil
 }
 
@@ -559,8 +711,15 @@ func (a *App) SetRate(rate float64) error {
 }
 
 func (a *App) SetVolume(v float64) error {
+	if v < 0 {
+		v = 0
+	}
+	if v > 100 {
+		v = 100
+	}
 	a.mu.Lock()
 	p := a.player
+	a.volume = v
 	a.mu.Unlock()
 	if p == nil {
 		return fmt.Errorf("播放器未就绪")
@@ -592,8 +751,9 @@ func (a *App) onSyncEvent(ev SyncEvent) {
 		state, _ := d["state"].(string)
 		pos, _ := d["position"].(float64)
 		members, _ := d["members"].([]MemberInfo)
+		again, _ := d["again"].(bool)
 
-		logf("joined room=%s created=%v state=%s pos=%.2f members=%d", room, created, state, pos, len(members))
+		logf("joined room=%s created=%v again=%v state=%s pos=%.2f members=%d", room, created, again, state, pos, len(members))
 		a.mu.Lock()
 		a.roomCode = room
 		a.connState = "connected"
@@ -614,7 +774,7 @@ func (a *App) onSyncEvent(ev SyncEvent) {
 
 		wailsruntime.EventsEmit(a.ctx, "room:joined", map[string]interface{}{
 			"room": room, "created": created, "state": state,
-			"position": pos, "members": members,
+			"position": pos, "members": members, "again": again,
 		})
 
 	case "state":
@@ -634,6 +794,12 @@ func (a *App) onSyncEvent(ev SyncEvent) {
 	case "notice":
 		wailsruntime.EventsEmit(a.ctx, "room:notice", ev.Data)
 
+	case "reconnecting":
+		a.mu.Lock()
+		a.connState = "reconnecting"
+		a.mu.Unlock()
+		wailsruntime.EventsEmit(a.ctx, "room:reconnecting", ev.Data)
+
 	case "error":
 		a.mu.Lock()
 		a.connState = "disconnected"
@@ -641,8 +807,9 @@ func (a *App) onSyncEvent(ev SyncEvent) {
 		wailsruntime.EventsEmit(a.ctx, "room:error", ev.Data)
 
 	case "closed":
+		// 只是"这条连接断了"，重连由同步层自己接手，界面先显示重连中
 		a.mu.Lock()
-		a.connState = "disconnected"
+		a.connState = "reconnecting"
 		a.mu.Unlock()
 		wailsruntime.EventsEmit(a.ctx, "room:closed", ev.Data)
 	}
@@ -656,6 +823,7 @@ func (a *App) applyRemote(state string, pos float64) {
 	prev := a.roomState
 	a.roomState = state
 	a.isPaused = state != "playing"
+	sc := a.sync
 	a.mu.Unlock()
 
 	if p == nil {
@@ -673,6 +841,10 @@ func (a *App) applyRemote(state string, pos float64) {
 		p.Play()
 	} else {
 		p.Pause()
+	}
+	// 跟上远端后立刻回报自己的成员状态，别让成员面板等到下一次心跳
+	if sc != nil {
+		sc.ReportMemberState(state)
 	}
 }
 
@@ -700,6 +872,12 @@ func (a *App) onPlayerEvent(name string, v interface{}) {
 				a.fileSent = true
 				a.mu.Unlock()
 			}
+		}
+	case "volume":
+		if f, ok := v.(float64); ok {
+			a.mu.Lock()
+			a.volume = f
+			a.mu.Unlock()
 		}
 	case "pause":
 		b, ok := v.(bool)

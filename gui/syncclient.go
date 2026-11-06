@@ -17,7 +17,11 @@ import (
 // 关键设计（都是 v0.3 / v0.4 踩过坑之后定下来的）：
 //   - 只在收到 hello 之后才允许上报本地操作，否则播放器启动期的初始事件会污染房间；
 //   - 本地状态与服务器最近告知的状态一致时不上报，避免 A→B→A 回声；
-//   - 位置永远取自服务器锚点推算，不信任任何"取不到就返回 0"的默认值。
+//   - 位置永远取自服务器锚点推算，不信任任何"取不到就返回 0"的默认值；
+//   - 写操作必须串行（v0.5.1）：gorilla/websocket 对并发写是直接 panic 的，
+//     心跳线程与用户操作同时发包会整个进程崩掉；
+//   - 断线要自己接回来（v0.5.1）：没有重连时，一次抖动就变成"两个人都还在看，
+//     但谁也收不到谁"，这正是用户报的"互相看不到对方"的另一半成因。
 
 type MemberInfo struct {
 	Name     string  `json:"name"`
@@ -47,34 +51,41 @@ type Msg struct {
 
 // SyncEvent 是同步层推给界面的结构化事件。
 type SyncEvent struct {
-	Kind string      // joined / state / members / notice / error / closed
+	Kind string      // joined / state / members / notice / error / closed / reconnecting
 	Data interface{} // 具体载荷，前端按 Kind 解读
 }
 
 type SyncClient struct {
-	mu     sync.Mutex
-	conn   *websocket.Conn
-	server string
-	room   string
-	name   string
-	pass   string
+	mu      sync.Mutex
+	writeMu sync.Mutex // gorilla 不允许并发写，所有 WriteMessage 都过这把锁
+	conn    *websocket.Conn
+	server  string
+	room    string
+	name    string
+	pass    string
 
 	// 服务器最近一次告知的权威状态
-	roomState  string
-	anchorPos  float64
-	anchorMs   int64
-	rate       float64
-	members    []MemberInfo
-	lastFile   string
-	lastDur    float64
-	helloDone  bool
-	closed     bool
-	retryCount int
+	roomState    string
+	anchorPos    float64
+	anchorMs     int64
+	rate         float64
+	members      []MemberInfo
+	lastFile     string
+	lastDur      float64
+	lastSize     int64
+	helloDone    bool
+	closed       bool
+	reconnecting bool
+	retryCount   int
+
+	// 上一次上报过的成员状态，避免每 5 秒刷一遍
+	lastMemberState string
 
 	onEvent     func(SyncEvent)
 	posProvider func() (float64, bool)
 	stopHB      chan struct{}
 	stopAll     chan struct{}
+	closeOnce   sync.Once
 }
 
 func newSyncClient(onEvent func(SyncEvent), posProvider func() (float64, bool)) *SyncClient {
@@ -93,13 +104,31 @@ func (c *SyncClient) emit(kind string, data interface{}) {
 }
 
 // Connect 建立连接并发送 join。room 为空表示创建新房间。
+// 首次连不上直接返回错误给界面（用户需要马上知道地址填错了），
+// 连上之后的断线由 readLoop 里的 reconnect 负责。
 func (c *SyncClient) Connect(server, room, name, password string) error {
 	c.mu.Lock()
-	c.server, c.name, c.pass = server, name, password
+	c.server, c.name, c.pass = normalizeServer(server), name, password
 	if room != "" {
 		c.room = room
 	}
 	c.closed = false
+	c.helloDone = false
+	c.lastMemberState = ""
+	c.mu.Unlock()
+
+	if err := c.dialAndJoin(); err != nil {
+		return err
+	}
+	go c.readLoop()
+	go c.heartbeatLoop()
+	return nil
+}
+
+// dialAndJoin 建一条新连接并发出 join（首次连接与重连共用）。
+func (c *SyncClient) dialAndJoin() error {
+	c.mu.Lock()
+	server, room, name, pass := c.server, c.room, c.name, c.pass
 	c.mu.Unlock()
 
 	url := fmt.Sprintf("ws://%s/ws", server)
@@ -113,7 +142,7 @@ func (c *SyncClient) Connect(server, room, name, password string) error {
 	c.conn = conn
 	c.mu.Unlock()
 
-	join := Msg{Type: "join", Name: name, Password: password}
+	join := Msg{Type: "join", Name: name, Password: pass}
 	if room != "" {
 		join.Room = room
 	}
@@ -121,9 +150,7 @@ func (c *SyncClient) Connect(server, room, name, password string) error {
 		conn.Close()
 		return err
 	}
-
-	go c.readLoop()
-	go c.heartbeatLoop()
+	logf("join 已发送 server=%s room=%q name=%s", server, room, name)
 	return nil
 }
 
@@ -135,34 +162,86 @@ func (c *SyncClient) send(m Msg) error {
 		return fmt.Errorf("未连接")
 	}
 	data, _ := json.Marshal(m)
+
+	// gorilla/websocket 检测到并发写会 panic，心跳与用户操作必须排队
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
 func (c *SyncClient) readLoop() {
-	c.mu.Lock()
-	conn := c.conn
-	c.mu.Unlock()
-	if conn == nil {
-		return
-	}
-
 	for {
+		c.mu.Lock()
+		conn := c.conn
+		closed := c.closed
+		c.mu.Unlock()
+		if conn == nil || closed {
+			return
+		}
+
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			c.mu.Lock()
-			alreadyClosed := c.closed
+			closed = c.closed
 			c.mu.Unlock()
-			if !alreadyClosed {
-				c.emit("closed", err.Error())
+			if closed {
+				return
 			}
+			logf("与服务器断开: %v", err)
+			// 先通知界面"正在重连"，再进入重连循环；重连成功就继续读这条新连接
+			c.emit("closed", err.Error())
+			if c.reconnect() {
+				continue
+			}
+			c.emit("error", "与服务器的连接已断开，重连失败")
 			return
 		}
+
 		var m Msg
 		if err := json.Unmarshal(data, &m); err != nil {
 			continue
 		}
 		c.handle(m)
 	}
+}
+
+// reconnect 指数退避重连（1s→10s，最多 20 次，约两分半）。
+//
+// 房间在服务端是保留 15 分钟的，所以断线回来还是同一个房间、同一个进度；
+// 用的房间码必须是 c.room（服务器在 hello 里回填的），绝不能拿用户输入框的值，
+// 否则"重连＝新建一个空房间"，v0.3 踩过。
+func (c *SyncClient) reconnect() bool {
+	backoff := time.Second
+	for i := 0; i < 20; i++ {
+		select {
+		case <-c.stopAll:
+			return false
+		case <-time.After(backoff):
+		}
+		if c.isClosed() {
+			return false
+		}
+		c.mu.Lock()
+		c.reconnecting = true
+		c.retryCount = i + 1
+		c.mu.Unlock()
+		c.emit("reconnecting", i+1)
+
+		if err := c.dialAndJoin(); err != nil {
+			logf("重连第 %d 次失败: %v", i+1, err)
+			if backoff < 10*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+		logf("重连成功（第 %d 次）", i+1)
+		c.mu.Lock()
+		c.reconnecting = false
+		c.mu.Unlock()
+		return true
+	}
+	return false
 }
 
 func (c *SyncClient) handle(m Msg) {
@@ -181,18 +260,22 @@ func (c *SyncClient) handle(m Msg) {
 		}
 		c.members = m.Members
 		c.retryCount = 0
+		c.reconnecting = false
+		rate := c.rate
+		file, dur, size := c.lastFile, c.lastDur, c.lastSize
 		c.mu.Unlock()
 
 		// 重连后要重新上报片源信息，否则成员列表会丢时长
-		if !first && c.lastFile != "" {
-			c.send(Msg{Type: "fileInfo", File: c.lastFile, Duration: c.lastDur})
+		if !first && file != "" {
+			c.send(Msg{Type: "fileInfo", File: file, Size: size, Duration: dur})
 		}
 		c.emit("joined", map[string]interface{}{
 			"room":     m.Room,
 			"created":  m.Created,
 			"state":    m.State,
-			"position": c.targetPos(m.State, m.Position, m.AnchorMs, c.rate),
+			"position": c.targetPos(m.State, m.Position, m.AnchorMs, rate),
 			"members":  m.Members,
+			"again":    !first, // 重连回来的 hello，界面不要再弹"已加入房间"
 		})
 
 	case "sync":
@@ -244,8 +327,17 @@ func (c *SyncClient) handle(m Msg) {
 
 	case "joinError":
 		c.mu.Lock()
-		c.closed = true
+		retrying := c.reconnecting
+		if !retrying {
+			c.closed = true
+		}
 		c.mu.Unlock()
+		// 重连时最常撞到的是"昵称被自己那条还没超时的旧连接占着"，
+		// 服务端 60 秒读超时后会自己清掉，等下一轮再试即可。
+		if retrying {
+			logf("重连被拒绝: %s（稍后重试）", m.Error)
+			return
+		}
 		c.emit("error", m.Error)
 
 	case "error":
@@ -287,6 +379,12 @@ func (c *SyncClient) Members() []MemberInfo {
 	return c.members
 }
 
+func (c *SyncClient) isClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
 // ---------- 本地操作上报 ----------
 
 // ReportPlay 上报"我开始播放了"。位置与状态都与房间一致时不重复发送。
@@ -301,7 +399,7 @@ func (c *SyncClient) ReportPlay(pos, rate float64) {
 	c.mu.Unlock()
 	logf("send play pos=%.2f rate=%.2f", pos, rate)
 	c.send(Msg{Type: "play", Position: pos, Rate: rate})
-	c.send(Msg{Type: "memberState", State: "playing"})
+	c.ReportMemberState("playing")
 }
 
 func (c *SyncClient) ReportPause(pos float64) {
@@ -315,7 +413,7 @@ func (c *SyncClient) ReportPause(pos float64) {
 	c.mu.Unlock()
 	logf("send pause pos=%.2f", pos)
 	c.send(Msg{Type: "pause", Position: pos})
-	c.send(Msg{Type: "memberState", State: "paused"})
+	c.ReportMemberState("paused")
 }
 
 func (c *SyncClient) ReportSeek(pos float64) {
@@ -330,9 +428,27 @@ func (c *SyncClient) ReportSeek(pos float64) {
 	c.send(Msg{Type: "seek", Position: pos})
 }
 
+// ReportMemberState 上报自己的播放器状态（有变化才发）。
+// 不这么做的话，成员面板里的"谁在播放"要等到下一次心跳才更新。
+func (c *SyncClient) ReportMemberState(state string) {
+	switch state {
+	case "playing", "paused", "buffering":
+	default:
+		return
+	}
+	c.mu.Lock()
+	if !c.helloDone || c.lastMemberState == state {
+		c.mu.Unlock()
+		return
+	}
+	c.lastMemberState = state
+	c.mu.Unlock()
+	c.send(Msg{Type: "memberState", State: state})
+}
+
 func (c *SyncClient) SetFileInfo(name string, size int64, dur float64) {
 	c.mu.Lock()
-	c.lastFile, c.lastDur = name, dur
+	c.lastFile, c.lastDur, c.lastSize = name, dur, size
 	c.mu.Unlock()
 	c.send(Msg{Type: "fileInfo", File: name, Size: size, Duration: dur})
 }
@@ -346,6 +462,8 @@ func (c *SyncClient) SetRate(rate float64) {
 	if state == "playing" {
 		c.send(Msg{Type: "play", Position: pos, Rate: rate})
 	}
+	// 暂停时调速，服务器不会收到任何消息（play 会顺带把房间改成 playing），
+	// 所以只把倍速记在本地，等真正播放时随 play 一起带上。
 }
 
 // ---------- 心跳 / 断线重连 ----------
@@ -389,13 +507,17 @@ func (c *SyncClient) Close() {
 	c.conn = nil
 	c.mu.Unlock()
 
+	c.closeOnce.Do(func() { close(c.stopAll) })
 	select {
 	case <-c.stopHB:
 	default:
 		close(c.stopHB)
 	}
 	if conn != nil {
+		c.writeMu.Lock()
+		conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"leave"}`))
+		c.writeMu.Unlock()
 		conn.Close()
 	}
 }

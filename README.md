@@ -93,7 +93,7 @@ cd server && go build -o syncwatch-server . && PORT=8995 ./syncwatch-server
 | 形态 | 单窗口，mpv 画面内嵌在界面里 | 命令行四步问答 + 独立 mpv 窗口 |
 | 房间码 | 顶部显示，点一下复制 | 控制台彩色横幅 + 自动复制 |
 | 成员 / 片源 | 右侧成员面板，标出谁在缓冲、时长是否一致 | 控制台文字列表 |
-| 分发包 | `一起看-windows-v0.5.zip` | `syncwatch-windows-portable.zip` |
+| 分发包 | `一起看-windows-v0.5.1.zip` | `syncwatch-windows-portable.zip` |
 | 谁构建 | 目前需本地打包 | CI 打 tag 时自动构建 |
 
 #### 图形版（推荐）
@@ -106,7 +106,7 @@ cd gui
 powershell -ExecutionPolicy Bypass -File ..\windows\fetch-mpv.ps1   :: 准备播放内核（与命令行版共用同一份 mpv）
 echo 你的IP:8995 > server.txt                                       :: 预置地址，打包时会带上
 build.bat                                                           :: 等价 wails build -platform windows/amd64
-打包.bat                                                             :: 产出 dist\一起看-windows-v0.5.zip
+打包.bat                                                             :: 产出 dist\一起看-windows-v0.5.1.zip
 ```
 
 解压后双击 `开始一起看.bat`。包内若带 `server.txt` 会自动读取；不带则首次打开点右上角齿轮填 `1.2.3.4:8995`，填完可点「测试连接」确认。
@@ -117,11 +117,21 @@ build.bat                                                           :: 等价 wa
 
 ```
 首页填昵称 → 创建房间 / 加入房间 → 选择本地视频 → 进播放页
-播放页：顶部  片名 + 房间码（点击复制）+ 连接状态 + 时间
+播放页：顶部  片名 + 房间码（点击复制）+ 连接状态 + 服务器地址 + 时间
         中间  视频（内嵌在同一个窗口里，不是独立窗口）
         底部  播放/暂停 · 进度 · 倍速 · 音量 · 离开
         右侧  成员面板（谁在播放、谁在缓冲、片源时长是否一致）
 ```
+
+播放页的快捷操作（v0.5.1）：
+
+| 操作 | 效果 |
+|---|---|
+| 单击画面 | 暂停 / 播放（双击画面 = 全屏） |
+| 空格 | 暂停 / 播放 |
+| ← / → | 快退 / 快进 5 秒，按住 Shift 为 30 秒；连按会连着走，松手才同步一次 |
+| ↑ / ↓ | 音量 ±5（只影响自己） |
+| F / M / Esc | 全屏 / 静音 / 收起成员面板或退出全屏 |
 
 > 设计与实施记录见 [docs/06-Windows客户端GUI设计.md](docs/06-Windows客户端GUI设计.md)（第 12 章是技术验证结论与踩坑清单）。
 
@@ -342,23 +352,22 @@ current = position + (now - anchor) * rate      // 仅在 playing 时累加
 |---|---|---|
 | 服务端二进制 | `cd server && go build -o syncwatch-server .` | 本地 / CI（linux amd64 + arm64） |
 | 图形版 exe | `gui\build.bat`（= `wails build -platform windows/amd64`） | **仅本地** |
-| 图形版 zip | `gui\打包.bat` → `dist\一起看-windows-v0.5.zip` | **仅本地** |
+| 图形版 zip | `gui\打包.bat` → `dist\一起看-windows-v0.5.1.zip` | **仅本地** |
 | 控制台版 zip | `windows\build.bat` + `windows\打包.bat` | 本地 / CI |
 | Android APK | `android\build-apk.bat` → `dist\一起看-android-v0.4.apk` | 本地 / CI |
 | 线上部署 | `server\deploy.sh`（rsync + docker compose） | 仅本地 |
 
 **打 tag 自动发布**：推 `v0.5` 这类 tag 后，GitHub Actions 编译服务端（amd64 / arm64）、控制台版 Windows 包、Android APK，并在 Releases 页面建版本。**图形版不在 CI 范围内**（workflow 里没有 Node + Wails 步骤），要发就本地打包后手动传上去。
 
-发版时版本号散在 6 处，漏一处就会出现"关于里显示 v0.4、包名却是 v0.5"：
+发版时版本号散在 7 处，漏一处就会出现"关于里显示 v0.4、包名却是 v0.5"：
 
 1. `android/app/build.gradle` 的 `versionCode` / `versionName`
 2. `android/build-apk.bat` 的 `set "VER="`
 3. `windows/打包.bat` 的 zip 文件名
 4. `windows/ui.go` 的 `const AppVersion`
 5. `gui/打包.bat` 的 `set "VER="`
-6. `server/main.go` 根路径返回的版本串
-
-其中第 5 项目前只影响 zip 名——图形版界面还没放版本号，等加「关于」页时要一并接上。
+6. `gui/app.go` 的 `const AppVersion`（v0.5.1 起显示在设置面板底部）
+7. `server/main.go` 根路径返回的版本串
 
 ## 联调与测试
 
@@ -386,11 +395,27 @@ adb shell am start -n com.syncwatch.app/.MainActivity \
 ## 常见问题
 
 <details>
-<summary><b>两个人不在同一个房间，各看各的</b></summary>
+<summary><b>两个人都显示「已连接」，却互相看不到，操作也传不过去</b></summary>
 
-最常见原因：**两个人都点了「创建房间」**，于是各自建了一间。正确流程是——一个人创建，把播放页顶部显示的 6 位房间码（点一下即复制）发给另一个人，后者走「加入房间」填进去。
+先看**播放页顶栏的服务器地址**：两个人的那一串必须完全一致。
 
-如果看到红字「你输入的房间码 XXX 不存在或已解散」，说明码打错了或房间已过期，你其实新建了一个空房。核对后重启即可。Android 端同理，房间码显示在播放页顶部，点一下可复制。
+最常见的原因就是不一致——各自连到了不同的服务器。典型场景：一方按老习惯在设置里填了 `127.0.0.1:8995`（或 `localhost`），那只有他自己那台电脑能连；另一边填的是公网地址。两边都能连上、都能建房，房间码甚至还长得一样，但两个房间在两台不同的服务器上，所以成员列表里只有自己，拖动进度也不会影响对方。
+
+排查顺序：
+
+1. 播放页顶栏、或成员面板底部，读出双方的服务器地址，必须一致；
+2. 地址是 `127.0.0.1` / `localhost` / `0.0.0.0` 时，客户端会用黄字标出「仅本机」——这种地址不可能和朋友一起看，改成服务器的公网地址；
+3. 地址一致仍不行，去服务器上看 `docker logs syncwatch`，正常应有两条 `<昵称> joined`。
+
+v0.5.1 起：分发包自带 `server.txt` 时，若本地配置里残留了回环地址，启动会自动改用 `server.txt` 的公网地址；服务器地址也会直接显示在播放页顶栏，不用再靠猜。
+</details>
+
+<details>
+<summary><b>两个人都点了「创建房间」，各看各的</b></summary>
+
+正确流程是——一个人创建，把播放页顶部显示的 6 位房间码（点一下即复制）发给另一个人，后者走「加入房间」填进去。
+
+v0.5.1 起，如果填的房间码在服务器上不存在（打错、或空房超过 15 分钟被回收），会弹出阻断式提示「没有加入朋友的房间」——因为服务器会替你新建一个**同码的空房**，此时两边看着都是"已连接"，实际是两个房间。点「返回重新输入」核对房间码即可。Android 端同理，房间码显示在播放页顶部，点一下可复制。
 </details>
 
 <details>
@@ -454,6 +479,7 @@ adb shell am start -n com.syncwatch.app/.MainActivity \
 - `v0.3` 房间跨断线保留（15 分钟）；漂移纠偏只发给漂移者；Android 缓冲状态不再被误判成暂停；服务端位置参数校验
 - `v0.4` 双端实机联调：修复 mpv 布尔属性解析错误导致的"远端放音本端不动"、seek 事件取错位置导致的"跳回片头"；成员状态实时上报；纠偏阈值分档
 - `v0.5` Windows 图形客户端：单窗口一体化（视频内嵌、房间码可复制、成员面板、全屏控制条自动隐藏、片源时长提示）；**协议与服务端零改动**。分发包目前需本地打包，CI 仍只产控制台版
+- `v0.5.1` 修「两台电脑都显示已连接却互相看不到」：根因是图形版的自动化联调入口会把 `127.0.0.1` 写进本地配置，而配置优先级高于分发包自带的 `server.txt`，于是房主连本机、朋友连公网，两边各建了一个同码房间。同时修：WS 并发写崩溃、断线不重连；加入不存在的房间码改为阻断式提示，回环地址与服务器地址在界面上明示；新增单击画面暂停/播放、方向键控进度与音量
 - `v0.6`（计划）房主踢人、房间锁、Android 前台 Service
 - `v0.7`（计划）语音 / 文字聊天（纯信令，成本极低）
 - `v1.0`（计划）一体化安装包、自动更新

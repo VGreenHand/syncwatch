@@ -45,3 +45,5 @@ export function StopVideo():Promise<void>;
 export function ToggleFullscreen():Promise<boolean>;
 
 export function TogglePlay():Promise<boolean>;
+
+export function Version():Promise<string>;

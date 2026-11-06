@@ -89,3 +89,7 @@ export function ToggleFullscreen() {
 export function TogglePlay() {
   return window['go']['main']['App']['TogglePlay']();
 }
+
+export function Version() {
+  return window['go']['main']['App']['Version']();
+}

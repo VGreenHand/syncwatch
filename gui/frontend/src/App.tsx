@@ -72,6 +72,14 @@ const stateDot = (s: string) => {
   }
 }
 
+// 回环地址只有本机能连——朋友永远接不上。
+// 两个人各自连着自己的服务器时，界面都显示"已连接"，但互相看不到对方，
+// 这正是 v0.5 之后最容易被误判成"同步坏了"的情况。
+const isLoopback = (s?: string) => {
+  const h = (s || '').trim().toLowerCase()
+  return h.startsWith('127.') || h.startsWith('localhost') || h.startsWith('0.0.0.0') || h.startsWith('[::1]') || h.startsWith('::1')
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>('home')
   const [panel, setPanel] = useState<Panel>(null)
@@ -93,6 +101,10 @@ export default function App() {
   const [full, setFull] = useState(false)
   const [scrubbing, setScrubbing] = useState(false)
   const [ctrlVisible, setCtrlVisible] = useState(true)
+  const [osd, setOsd] = useState('')
+  // 加入房间时如果服务器告诉我们"这房间本来不存在"，说明进错了地方，
+  // 必须阻断式提示，不能只用 Toast（设计稿 4.3）。
+  const [joinWarn, setJoinWarn] = useState<{ room: string; server: string } | null>(null)
 
   const [notices, setNotices] = useState<Notice[]>([])
   const [error, setError] = useState('')
@@ -100,15 +112,31 @@ export default function App() {
   const [logs, setLogs] = useState('')
   const [serverCheck, setServerCheck] = useState('')
   const [confirmLeave, setConfirmLeave] = useState(false)
+  const [version, setVersion] = useState('')
 
   const videoRef = useRef<HTMLDivElement>(null)
   const hideTimer = useRef<number>(0)
   const noticeId = useRef(0)
+  const osdTimer = useRef<number>(0)
+  const clickTimer = useRef<number>(0)
+  // 方向键连按时，用它累积目标进度：mpv 跳转有延迟，
+  // 不能每次都拿"当前播放位置"当基准，否则按住右键会原地打转。
+  const seekPending = useRef<number | null>(null)
+  const seekTimer = useRef<number>(0)
+  // 本次点的是"加入"还是"创建"，用来判断 hello.created 是否意味着进错房间
+  const joinAttempt = useRef('')
 
   const toast = useCallback((text: string, kind: Notice['kind'] = 'info') => {
     const id = ++noticeId.current
     setNotices((prev) => [...prev.slice(-3), { id, text, kind }])
     window.setTimeout(() => setNotices((prev) => prev.filter((n) => n.id !== id)), 4000)
+  }, [])
+
+  // 轻量 OSD：调音量 / 快进快退时在画面下方闪一下，不堆通知
+  const showOsd = useCallback((text: string) => {
+    setOsd(text)
+    window.clearTimeout(osdTimer.current)
+    osdTimer.current = window.setTimeout(() => setOsd(''), 1200)
   }, [])
 
   // 把视频区矩形同步给 Go，Go 据此摆放 mpv 宿主子窗口
@@ -146,17 +174,30 @@ export default function App() {
       LogMsg('调试意图: ' + JSON.stringify(d))
       if (!d?.video) return
       const nm = d.name || '测试端'
+      const srv = d.server || '127.0.0.1:18998'
       setName(nm)
-      setServer((s) => s || '127.0.0.1:18998')
+      setServer(srv)
       try {
         const v: any = await LoadVideo(d.video)
         if (v) setVideo({ path: v.path, name: v.name, size: v.size })
-        await SaveConfig({ server: '127.0.0.1:18998', name: nm, lastVideo: d.video } as any)
+        // 调试入口只在内存里改服务器地址，绝不写 config.json：
+        // 以前这里会 SaveConfig，把 127.0.0.1 永久写进用户配置，
+        // 于是分发包自带的公网地址被顶掉，两个人各自连到不同服务器。
+        await SaveConfig({ name: nm, lastVideo: d.video } as any)
         if (d.room === 'new') {
+          joinAttempt.current = ''
           await CreateRoom(nm, '')
         } else if (d.room) {
+          joinAttempt.current = d.room
           setRoomInput(d.room)
           await JoinRoom(d.room, nm, '')
+        }
+        // 联调用的额外动作：seek=秒数，toggle=1 表示播放/暂停一次
+        if (d.seek) {
+          window.setTimeout(() => { Seek(Number(d.seek)).catch(() => { }) }, 1500)
+        }
+        if (d.toggle === '1') {
+          window.setTimeout(() => { TogglePlay().catch(() => { }) }, 1800)
         }
       } catch (e: any) {
         setError(String(e))
@@ -169,6 +210,7 @@ export default function App() {
       if (c?.server) setServer(c.server)
       if (c?.name) setName(c.name)
     }).catch(() => { })
+    GetState().then((s: any) => { if (s?.version) setVersion(String(s.version)) }).catch(() => { })
     EventsOn('host:error', (m: string) => setError(String(m)))
   }, [])
 
@@ -176,18 +218,31 @@ export default function App() {
   useEffect(() => {
     const offs = [
       EventsOn('room:joined', (d: any) => {
-        setRoom(d?.room || '')
+        const code = d?.room || ''
+        setRoom(code)
         setConn('connected')
         setPage('player')
         setBusy(false)
-        if (d?.created) {
-          toast(`已创建房间 ${d.room}，把房间码发给朋友`)
-        } else if (roomInput && d?.room && String(roomInput).toUpperCase() !== d.room) {
-          setError(`你输入的房间码 ${String(roomInput).toUpperCase()} 不存在或已解散，本次创建了新房间 ${d.room}`)
-        } else {
-          toast(`已加入房间 ${d.room}`)
-        }
         if (Array.isArray(d?.members)) setMembers(d.members)
+
+        if (d?.again) {
+          // 断线重连回来的 hello：不要再说"已加入房间"
+          toast(`已重新连上房间 ${code}`)
+          joinAttempt.current = ''
+          return
+        }
+        const asked = joinAttempt.current
+        joinAttempt.current = ''
+        if (asked && (d?.created || String(asked).toUpperCase() !== code)) {
+          // 填了房间码，服务器却新建了房间 —— 说明这个码在**这台服务器**上不存在。
+          // 房间码打错、房间已过期、或者两个人连的根本不是同一台服务器，都会走到这里。
+          // 这种时候界面必须挡住用户，否则两边都显示"已连接"，却谁也看不到谁。
+          setJoinWarn({ room: code, server })
+        } else if (d?.created) {
+          toast(`已创建房间 ${code}，把房间码发给朋友`)
+        } else {
+          toast(`已加入房间 ${code}`)
+        }
       }),
       EventsOn('room:state', (d: any) => {
         if (d?.operator) {
@@ -208,9 +263,10 @@ export default function App() {
         setError(String(e))
         setConn('disconnected')
       }),
+      EventsOn('room:reconnecting', () => setConn('reconnecting')),
       EventsOn('room:closed', () => {
-        setConn('disconnected')
-        toast('与服务器的连接已断开', 'error')
+        setConn('reconnecting')
+        toast('与服务器的连接断开，正在重连…', 'warn')
       }),
       EventsOn('player:loaded', (v: any) => {
         if (v?.path) setVideo({ path: v.path, name: v.name, size: v.size })
@@ -219,7 +275,7 @@ export default function App() {
       EventsOn('player:exited', () => toast('播放器已退出', 'warn')),
     ]
     return () => offs.forEach((off) => off())
-  }, [roomInput, toast])
+  }, [roomInput, server, toast])
 
   // 轮询状态：进度显示不依赖事件推送，避免漏事件导致时间不动
   useEffect(() => {
@@ -228,7 +284,7 @@ export default function App() {
       try {
         const s: any = await GetState()
         if (!s) return
-        if (!scrubbing) setPos(Number(s.position) || 0)
+        if (!scrubbing && seekPending.current === null) setPos(Number(s.position) || 0)
         if (Number(s.duration) > 0) setDur(Number(s.duration))
         setPaused(Boolean(s.paused))
         if (s.conn) setConn(s.conn)
@@ -238,6 +294,14 @@ export default function App() {
     }, 1000)
     return () => window.clearInterval(t)
   }, [page, scrubbing])
+
+  // 进播放页时从 mpv 读一次真实音量，之后以本地状态为准
+  useEffect(() => {
+    if (page !== 'player') return
+    GetState().then((s: any) => {
+      if (typeof s?.volume === 'number') setVolume(Math.round(s.volume))
+    }).catch(() => { })
+  }, [page])
 
   // 全屏：鼠标静止 2 秒后隐藏控制条
   useEffect(() => {
@@ -275,7 +339,12 @@ export default function App() {
     setError('')
     if (!video) { setError('请先选择一部本地视频'); return }
     if (!name.trim()) { setError('请填写昵称'); return }
+    if (isLoopback(server)) {
+      // 不阻断，但要让人知道：朋友连不上这台机器
+      toast('服务器填的是本机回环地址，只有这台电脑能连', 'warn')
+    }
     setBusy(true)
+    joinAttempt.current = ''
     try {
       await SaveConfig({ server, name, lastVideo: video.path } as any)
       await CreateRoom(name.trim(), password)
@@ -290,7 +359,11 @@ export default function App() {
     if (!roomInput.trim()) { setError('请填写房间码'); return }
     if (!video) { setError('请先选择一部本地视频'); return }
     if (!name.trim()) { setError('请填写昵称'); return }
+    if (isLoopback(server)) {
+      toast('服务器填的是本机回环地址，朋友连不上这台电脑', 'warn')
+    }
     setBusy(true)
+    joinAttempt.current = roomInput.trim().toUpperCase()
     try {
       await SaveConfig({ server, name, lastVideo: video.path } as any)
       await JoinRoom(roomInput.trim(), name.trim(), password)
@@ -312,6 +385,26 @@ export default function App() {
     try { await Seek(v) } catch (e: any) { toast(String(e), 'error') }
   }
 
+  // 相对跳转：连按方向键时以"上一次的目标"为基准累积，
+  // 否则 mpv 还没跳完就去读当前位置，按住右键会原地打转。
+  // 连续按键只在停手 260ms 后发一条 seek，服务端那边还有 120ms 防抖。
+  const nudgeSeek = (delta: number) => {
+    const base = seekPending.current ?? pos
+    const max = dur > 0 ? Math.max(0, dur - 0.3) : base + delta
+    const target = Math.max(0, Math.min(max, base + delta))
+    seekPending.current = target
+    setScrubbing(true)
+    setPos(target)
+    showOsd(`${delta > 0 ? '快进' : '快退'} ${Math.abs(delta)} 秒 · ${fmtTime(target)}`)
+    window.clearTimeout(seekTimer.current)
+    seekTimer.current = window.setTimeout(() => {
+      const v = seekPending.current ?? target
+      seekPending.current = null
+      setScrubbing(false)
+      doSeek(v)
+    }, 260)
+  }
+
   const changeRate = async (r: number) => {
     setRate(r)
     try { await SetRate(r) } catch (e: any) { toast(String(e), 'error') }
@@ -322,10 +415,29 @@ export default function App() {
     try { await SetVolume(v) } catch { /* 忽略 */ }
   }
 
+  const nudgeVolume = (delta: number) => {
+    const target = Math.max(0, Math.min(100, volume + delta))
+    if (target === volume) return
+    changeVolume(target)
+    showOsd(target === 0 ? '静音' : `音量 ${Math.round(target)}%`)
+  }
+
   const toggleFull = async () => {
     const f = await ToggleFullscreen()
     setFull(Boolean(f))
     window.setTimeout(syncRect, 260)
+  }
+
+  // 画面单击 = 播放/暂停；双击 = 全屏。
+  // 单击要等 200ms 再执行，否则双击会先触发两次暂停/播放。
+  const onSurfaceClick = () => {
+    window.clearTimeout(clickTimer.current)
+    clickTimer.current = window.setTimeout(() => { toggle() }, 200)
+  }
+
+  const onSurfaceDoubleClick = () => {
+    window.clearTimeout(clickTimer.current)
+    toggleFull()
   }
 
   const leave = async () => {
@@ -340,6 +452,62 @@ export default function App() {
     setPaused(true)
     setCtrlVisible(true)
   }
+
+  // 播放页键盘快捷键：空格播放/暂停，左右快进快退，上下调音量，
+  // F 全屏，M 静音，Esc 关成员浮层/退全屏。
+  // 表单页有输入框，所以只在播放页且焦点不在输入框时接管。
+  useEffect(() => {
+    if (page !== 'player') return
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      if (panel === 'logs' || panel === 'settings') return
+      if (e.ctrlKey || e.altKey || e.metaKey) return
+
+      const big = e.shiftKey ? 30 : 5
+      switch (e.key) {
+        case ' ':
+        case 'Spacebar':
+          e.preventDefault()
+          toggle()
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          nudgeSeek(-big)
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          nudgeSeek(big)
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          nudgeVolume(5)
+          break
+        case 'ArrowDown':
+          e.preventDefault()
+          nudgeVolume(-5)
+          break
+        case 'f':
+        case 'F':
+          e.preventDefault()
+          toggleFull()
+          break
+        case 'm':
+        case 'M':
+          e.preventDefault()
+          changeVolume(volume > 0 ? 0 : 100)
+          showOsd(volume > 0 ? '静音' : '音量 100%')
+          break
+        case 'Escape':
+          if (panel === 'members') setPanel(null)
+          else if (full) toggleFull()
+          else if (confirmLeave) setConfirmLeave(false)
+          break
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [page, panel, full, pos, dur, volume, confirmLeave])
 
   const openLogs = async () => {
     setLogs(await GetLogs().catch(() => ''))
@@ -401,18 +569,23 @@ export default function App() {
           </div>
 
           <div className="server-line">
-            <span className={server ? 'ok' : 'warn'}>
+            <span className={server && !isLoopback(server) ? 'ok' : 'warn'}>
               {server ? `服务器 ${server}` : '未配置服务器地址'}
             </span>
             <button className="link" onClick={() => setPanel('settings')}>高级设置</button>
           </div>
+          {isLoopback(server) && (
+            <div className="error-line">
+              这是本机回环地址：只有这台电脑能连，朋友永远接不上。请改成服务器的公网地址（形如 1.2.3.4:8995）。
+            </div>
+          )}
           {error && <div className="error-line">{error}</div>}
         </div>
         {noticeBar}
         {panel === 'settings' && (
           <SettingsPanel
             server={server} setServer={setServer} name={name} setName={setName}
-            check={serverCheck} onCheck={checkServer}
+            check={serverCheck} onCheck={checkServer} version={version}
             onClose={() => setPanel(null)}
             onSave={async () => { await SaveConfig({ server, name } as any); setPanel(null); toast('设置已保存') }}
           />
@@ -489,7 +662,7 @@ export default function App() {
         {panel === 'settings' && (
           <SettingsPanel
             server={server} setServer={setServer} name={name} setName={setName}
-            check={serverCheck} onCheck={checkServer}
+            check={serverCheck} onCheck={checkServer} version={version}
             onClose={() => setPanel(null)}
             onSave={async () => { await SaveConfig({ server, name } as any); setPanel(null); toast('设置已保存') }}
           />
@@ -500,12 +673,17 @@ export default function App() {
   }
 
   const showPanel = panel === 'members'
+  const connLabel = conn === 'connected' ? '已连接' : conn === 'reconnecting' ? '重连中…' : conn === 'connecting' ? '连接中' : '已断开'
   return (
     <div className={`app player ${full ? 'is-full' : ''} ${ctrlVisible ? '' : 'hide-ctrl'}`}>
       <div className={`stage ${showPanel ? 'with-panel' : ''}`}>
-        <div className="video-wrap" ref={videoRef}>
+        <div className="video-wrap clickable" ref={videoRef}
+          onClick={onSurfaceClick}
+          onDoubleClick={onSurfaceDoubleClick}>
           <div className="video-area" />
         </div>
+
+        {osd && <div className="osd mono">{osd}</div>}
 
         <div className="overlay top">
           <div className="title-line">
@@ -514,9 +692,15 @@ export default function App() {
               <span className="mono">{room}</span>
               <IconCopy size={14} />
             </button>
-            <span className={`conn-chip ${conn}`}>
-              <i /> {conn === 'connected' ? '已连接' : conn === 'connecting' ? '连接中' : '已断开'}
+            <span className={`conn-chip ${conn}`} title={server ? `服务器 ${server}` : '未配置服务器'}>
+              <i /> {connLabel}
             </span>
+            {server && (
+              <span className={`srv-chip mono ${isLoopback(server) ? 'warn' : ''}`}
+                title={isLoopback(server) ? '这是本机回环地址，朋友连不上；请改成公网地址' : '当前服务器地址'}>
+                {isLoopback(server) ? '仅本机 · ' : ''}{server}
+              </span>
+            )}
             <span className="dur-chip mono">{fmtTime(pos)} / {fmtTime(dur)}</span>
           </div>
           <div className="top-actions">
@@ -557,6 +741,11 @@ export default function App() {
               ))}
             </div>
             {otherDur && <div className="members-tip">有成员片源时长不一致，可能越看越歪</div>}
+            <div className="members-foot">
+              <span className="dim small">服务器</span>
+              <span className={`mono small ${isLoopback(server) ? 'warn-text' : ''}`}>{server || '未配置'}</span>
+              {isLoopback(server) && <span className="members-tip danger">回环地址只有本机能连，朋友连不上</span>}
+            </div>
           </aside>
         )}
 
@@ -576,9 +765,15 @@ export default function App() {
             <input
               className="scrub" type="range" min={0} max={dur > 0 ? dur : 1} step={0.2}
               value={Math.min(pos, dur || 1)}
-              onChange={(e) => { setScrubbing(true); setPos(Number(e.target.value)) }}
-              onMouseUp={() => { setScrubbing(false); doSeek(pos) }}
-              onTouchEnd={() => { setScrubbing(false); doSeek(pos) }}
+              onChange={(e) => { setScrubbing(true); setPos(Number(e.currentTarget.value)) }}
+              onPointerUp={(e) => {
+                // 直接用控件自己的值，不依赖上一次 setPos 的渲染结果
+                const v = Number(e.currentTarget.value)
+                setScrubbing(false)
+                doSeek(v)
+                e.currentTarget.blur() // 拖完交还焦点，空格/方向键继续走全局快捷键
+              }}
+              onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') doSeek(Number(e.currentTarget.value)) }}
             />
             <span className="time mono dim">{fmtTime(dur)}</span>
 
@@ -591,11 +786,12 @@ export default function App() {
             </div>
 
             <div className="vol">
-              <button className="icon-btn" title="静音" onClick={() => changeVolume(volume > 0 ? 0 : 100)}>
+              <button className="icon-btn" title="静音 (M)" onClick={() => nudgeVolume(volume > 0 ? -volume : 100)}>
                 {volume > 0 ? <IconVolume size={18} /> : <IconMute size={18} />}
               </button>
               <input className="vol-slider" type="range" min={0} max={100} value={volume}
-                onChange={(e) => changeVolume(Number(e.target.value))} />
+                onChange={(e) => changeVolume(Number(e.currentTarget.value))}
+                onPointerUp={(e) => e.currentTarget.blur()} />
             </div>
 
             <button className="btn ghost sm" onClick={() => setConfirmLeave(true)}>离开</button>
@@ -605,6 +801,30 @@ export default function App() {
       </div>
 
       {noticeBar}
+
+      {joinWarn && (
+        <div className="modal-mask">
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>没有加入朋友的房间</h3>
+            <p>
+              房间码 <b className="mono">{joinWarn.room}</b> 在服务器 <b className="mono">{joinWarn.server}</b> 上并不存在，
+              服务器替你新建了一个同码的空房间。所以现在房间里只有你一个人，朋友的操作你也收不到。
+            </p>
+            <p className="hint-line">常见原因：① 房间码打错或已被回收（空房 15 分钟后失效）；② 你和朋友填的服务器地址不是同一台。</p>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setJoinWarn(null)}>我知道，先留在这里</button>
+              <button className="btn primary" onClick={async () => {
+                setJoinWarn(null)
+                await LeaveRoom().catch(() => { })
+                setPage('join')
+                setRoom('')
+                setMembers([])
+                setConn('idle')
+              }}>返回重新输入</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmLeave && (
         <div className="modal-mask" onClick={() => setConfirmLeave(false)}>
@@ -642,8 +862,10 @@ function SettingsPanel(props: {
   server: string; setServer: (s: string) => void
   name: string; setName: (s: string) => void
   check: string; onCheck: () => void
+  version?: string
   onClose: () => void; onSave: () => void
 }) {
+  const loopback = isLoopback(props.server)
   return (
     <div className="drawer-mask" onClick={props.onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
@@ -654,7 +876,7 @@ function SettingsPanel(props: {
         <div className="drawer-body">
           <label className="field">
             <span className="label">服务器地址</span>
-            <input className="input mono" value={props.server} placeholder="例如 1.2.3.4:8995"
+            <input className={`input mono ${loopback ? 'input-warn' : ''}`} value={props.server} placeholder="例如 1.2.3.4:8995"
               onChange={(e) => props.setServer(e.target.value)} />
           </label>
           <div className="row-between">
@@ -662,6 +884,16 @@ function SettingsPanel(props: {
             <button className="btn sm" onClick={props.onCheck}>测试连接</button>
           </div>
           {props.check && <div className="hint">{props.check}</div>}
+          {loopback && (
+            <div className="error-box">
+              <IconAlert size={16} />
+              <span>
+                <b>{props.server}</b> 是本机回环地址，只有这台电脑能连。
+                和朋友一起看时，必须填服务器的公网地址（形如 <code>1.2.3.4:8995</code>），
+                否则你俩各自连着自己的服务器，界面都显示"已连接"，但互相看不到、操作也传不过去。
+              </span>
+            </div>
+          )}
 
           <label className="field">
             <span className="label">默认昵称</span>
@@ -672,8 +904,14 @@ function SettingsPanel(props: {
             <IconLink size={15} />
             <span>播放器使用程序目录下的 <code>mpv\mpv.exe</code>；找不到时可用环境变量 <code>SYNCWATCH_MPV</code> 指定。</span>
           </div>
+
+          <div className="note">
+            <IconLink size={15} />
+            <span>快捷键：空格播放/暂停 · ←/→ 快退快进 5 秒（按住 Shift 为 30 秒）· ↑/↓ 音量 · F 全屏 · M 静音。单击画面也能暂停/播放，双击全屏。</span>
+          </div>
         </div>
         <div className="drawer-foot">
+          <span className="dim small">{props.version}</span>
           <button className="btn primary" onClick={props.onSave}>保存</button>
         </div>
       </div>
