@@ -57,7 +57,8 @@
 
 - 一台有公网 IP 的服务器（云主机即可，Ubuntu / Debian 都行）
 - 参与的人各自持有**同一个版本**的视频文件（时长必须一致）
-- Windows 端无需安装任何东西（mpv 随包提供）；Android 7.0 以上
+- Windows：用分发包时无需安装任何东西（mpv 随包）；要从源码编译则需 Go 1.22+ / Node 18+ / Wails CLI
+- Android 7.0 以上
 
 ### 1. 起服务端
 
@@ -83,11 +84,34 @@ cd server && go build -o syncwatch-server . && PORT=8995 ./syncwatch-server
 
 部署细节（镜像源、systemd 常驻、升级、迁移、限流加固）见 [docs/03-服务端部署.md](docs/03-服务端部署.md)。
 
-### 2. Windows 端（图形界面）
+### 2. Windows 端
 
-**最省事**：从 [Releases](https://github.com/yangnicejin/syncwatch/releases) 下载 `syncwatch-windows-portable.zip`（约 50 MB，内含 mpv），解压后双击 `开始一起看.bat`。
+同一套协议有两个 Windows 客户端，**日常用图形版，排障用控制台版**：
 
-首次打开：右上角齿轮 → 填服务器地址（形如 `1.2.3.4:8995`）→ 保存。如果包内自带 `server.txt`，会自动读取，无需手填。
+| | 图形版 `gui/`（默认） | 控制台版 `windows/` |
+|---|---|---|
+| 形态 | 单窗口，mpv 画面内嵌在界面里 | 命令行四步问答 + 独立 mpv 窗口 |
+| 房间码 | 顶部显示，点一下复制 | 控制台彩色横幅 + 自动复制 |
+| 成员 / 片源 | 右侧成员面板，标出谁在缓冲、时长是否一致 | 控制台文字列表 |
+| 分发包 | `一起看-windows-v0.5.zip` | `syncwatch-windows-portable.zip` |
+| 谁构建 | 目前需本地打包 | CI 打 tag 时自动构建 |
+
+#### 图形版（推荐）
+
+需要 Go 1.22+、Node 18+、Wails CLI：
+
+```bat
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+cd gui
+powershell -ExecutionPolicy Bypass -File ..\windows\fetch-mpv.ps1   :: 准备播放内核（与命令行版共用同一份 mpv）
+echo 你的IP:8995 > server.txt                                       :: 预置地址，打包时会带上
+build.bat                                                           :: 等价 wails build -platform windows/amd64
+打包.bat                                                             :: 产出 dist\一起看-windows-v0.5.zip
+```
+
+解压后双击 `开始一起看.bat`。包内若带 `server.txt` 会自动读取；不带则首次打开点右上角齿轮填 `1.2.3.4:8995`，填完可点「测试连接」确认。
+
+> **注意**：Releases 里的 `syncwatch-windows-portable.zip` 是**控制台版**。CI 只装了 Go 和 Android SDK，没有 Node / Wails，因此不产出图形版安装包。想要 CI 也发图形版，得在 workflow 的 windows job 里加 Node + Wails CLI 两步。
 
 界面流程：
 
@@ -99,21 +123,11 @@ cd server && go build -o syncwatch-server . && PORT=8995 ./syncwatch-server
         右侧  成员面板（谁在播放、谁在缓冲、片源时长是否一致）
 ```
 
-**自己编译**（需要 Go 1.22+、Node 18+、Wails CLI）：
+> 设计与实施记录见 [docs/06-Windows客户端GUI设计.md](docs/06-Windows客户端GUI设计.md)（第 12 章是技术验证结论与踩坑清单）。
 
-```bat
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-cd gui
-:: 首次准备播放内核（复用 windows 目录里那份）
-powershell -ExecutionPolicy Bypass -File ..\windows\fetch-mpv.ps1
-echo 你的IP:8995 > server.txt
-wails build -platform windows/amd64
-打包.bat                          :: 产出 dist\一起看-windows-v0.5.zip
-```
+#### 控制台版（排障用）
 
-> 设计与实施记录见 [docs/06-Windows客户端GUI设计.md](docs/06-Windows客户端GUI设计.md)（文末有技术验证结论和踩坑清单）。
-
-**控制台版（保留，专用于排障）**：`windows/` 目录仍是原来的命令行客户端，日志更直白，定位"连不上 / 不同步"更快。
+`windows/` 是 v0.1 起就有的命令行客户端，日志直白，定位"连不上 / 不同步"比图形版更快。
 
 ```bat
 cd windows
@@ -121,9 +135,7 @@ build.bat        :: 会把 server.txt 里的地址编译进 exe
 启动观影.bat      :: 四步问答：昵称 → 视频路径 → 房间码 → 密码
 ```
 
-命令行参数（两个版本都支持）：
-
-启动后是四步问答：
+启动后依次输入：
 
 ```
 [1/4] 你的昵称              → 房间里显示的名字
@@ -134,7 +146,7 @@ build.bat        :: 会把 server.txt 里的地址编译进 exe
 
 > 从源码自己编译时，`build.bat` 会读取 `server.txt` 并用 `-ldflags -X main.builtinServer=` 把地址**编译进 exe**，之后把 exe 单独发给别人也能直连。CI 产物故意不这么做——公开仓库里不该出现私人地址。
 
-也支持纯命令行参数，方便做快捷方式：
+只有控制台版支持命令行参数，方便做快捷方式：
 
 | 参数 | 说明 |
 |------|------|
@@ -144,6 +156,8 @@ build.bat        :: 会把 server.txt 里的地址编译进 exe
 | `-password 密码` | 房间密码 |
 | `-file 路径` | 视频文件，留空则交互输入 |
 | `-mpv 路径` | 指定 mpv.exe（默认自动查找 `mpv\mpv.exe`，再退回 PATH） |
+
+图形版没有命令行参数，地址、昵称都在界面上填。需要无人值守起播（调试 / 自动化）时用环境变量：`SYNCWATCH_AUTO_VIDEO`、`SYNCWATCH_AUTO_ROOM`（`new` = 建房）、`SYNCWATCH_AUTO_NAME`。
 
 ### 3. Android 端
 
@@ -165,10 +179,11 @@ build-apk.bat            :: 产出 dist\一起看-android-v0.4.apk
 **一个人建房，其他人填同一个房间码。** 这一步搞错就会"各看各的"：
 
 ```
-你（房主）                          朋友
-启动 → 房间码直接回车               启动 → 房间码填 6ZJ46H
-  ↓                                  ↓
-顶部显示：房间码 6ZJ46H [复制]  ──→  加入成功，双方成员列表互相可见
+你（房主）                                朋友
+点「创建房间」→ 选片 → 开始             点「加入房间」→ 填 6ZJ46H → 选同一份片
+（控制台版：房间码那一步直接回车）
+  ↓                                       ↓
+顶部显示：房间码 6ZJ46H [复制]  ──→       加入成功，双方成员列表互相可见
 （房间码已自动复制到剪贴板）
 ```
 
@@ -188,8 +203,9 @@ syncwatch/
 │   ├── 01-方案设计.md          需求、架构选型、PCDN 风险分析、里程碑
 │   ├── 02-同步协议.md          消息格式、状态机、漂移算法（改协议先看这个）
 │   ├── 03-服务端部署.md        部署、加固、升级、迁移、排障
-│   ├── 04-Windows客户端.md     使用与构建
-│   └── 05-Android客户端.md     使用与构建
+│   ├── 04-Windows客户端.md     控制台版使用与构建（排障用）
+│   ├── 05-Android客户端.md     使用与构建
+│   └── 06-Windows客户端GUI设计.md  图形版设计稿 + 实施记录 + 踩坑清单
 ├── server/                    ← Go WebSocket 信令服务器（全部逻辑在 main.go）
 │   ├── main.go                 房间管理、权威状态机、心跳、限流
 │   ├── Dockerfile
@@ -219,8 +235,30 @@ syncwatch/
 ├── tools/                     ← 联调工具（不是产品代码）
 │   ├── sim/                    模拟多个成员进房，做协议回归
 │   └── ctl/                    对指定房间发单条 play/pause/seek
-├── dist/                      ← 构建产物（不入库）
+├── dist/                      ← 构建产物（不入库，包内含内置地址）
 └── .github/workflows/build.yml 打 tag 自动编译并发布 Release
+```
+
+## 仓库边界
+
+这个仓库刻意不含任何私人信息，clone 下来可以直接公开再分叉：
+
+| 不入库的东西 | 原因 | 怎么获得 |
+|---|---|---|
+| `private/` | 本地开发笔记：真实 IP、SSH、线上状态、待办、踩坑记录 | 只在作者本机，`.gitignore` 整目录排除 |
+| `windows/mpv/`、`gui/build/`、`gui/frontend/node_modules/` | 100 MB+ 播放内核与构建产物 | 跑 `windows/fetch-mpv.ps1`；`wails build` 自动装前端依赖 |
+| `windows/server.txt`、`gui/server.txt` | 一行真实服务器地址 | `echo 你的IP:8995 > server.txt` |
+| `dist/`、`*.exe`、`*.zip`、`*.apk` | 分发包里可能内置了地址 | 本地构建 |
+| `server/.env`、`server/deploy.env` | 部署目标与凭据 | 从对应 `.example` 复制 |
+| `android/local.properties`、`local-env.bat` | 本机 SDK / JDK 绝对路径 | 从对应 `.example` 复制 |
+
+所有 `.example` 只有占位值，照着填即可。提交前自查一遍（排除回环地址、示例地址和 Win32 版本号这些合法命中，剩下的才需要看）：
+
+```bash
+git add -A
+git grep --cached -nE '([0-9]{1,3}\.){3}[0-9]{1,3}|C:\\Users' \
+  | grep -vE '127\.0\.0\.1|0\.0\.0\.0|1\.2\.3\.4|255\.255\.255\.255|6\.0\.0\.0' \
+  || echo "干净"
 ```
 
 ## 同步是怎么做到的
@@ -267,7 +305,7 @@ current = position + (now - anchor) * rate      // 仅在 playing 时累加
 | S→C | `members` / `join` / `leave` | 成员信息 | 成员变化 |
 | S→C | `joinError` / `error` | `error` | 加入失败（随后断开）/ 非致命错误 |
 
-改协议必须**四处同步改**：`server/main.go`、`windows/main.go`、`android/.../Protocol.kt`、`docs/02-同步协议.md`。漏一处不会报错，只会"没反应"——这是最难查的一类问题。
+改协议必须**五处同步改**：`server/main.go`、`windows/main.go`（控制台版）、`gui/syncclient.go`（图形版，与前者同源）、`android/.../Protocol.kt`、`docs/02-同步协议.md`。漏一处不会报错，只会"没反应"——这是最难查的一类问题。
 
 ## 配置项
 
@@ -275,8 +313,10 @@ current = position + (now - anchor) * rate      // 仅在 playing 时累加
 |------|------|----------|
 | `server/.env` | 端口、基础镜像、GOPROXY | 否（有 `.env.example`） |
 | `server/deploy.env` | 部署目标的 host / port / user | 否（有 `.example`） |
-| `windows/server.txt` | Windows 默认服务器地址（一行 `host:port`） | 否 |
-| `windows/mpv/` | mpv 播放器（100MB+） | 否，`fetch-mpv.ps1` 下载 |
+| `windows/server.txt` | 控制台版默认服务器地址（一行 `host:port`，编译时注入 exe） | 否 |
+| `gui/server.txt` | 图形版默认服务器地址（打包时打进 zip） | 否 |
+| `windows/mpv/` | mpv 播放器（100MB+），两个 Windows 客户端共用 | 否，`fetch-mpv.ps1` 下载 |
+| `gui/frontend/node_modules/`、`gui/build/` | 前端依赖与 Wails 构建产物 | 否 |
 | `android/local.properties` | `sdk.dir` 与 `syncwatch.server` | 否（有 `.example`） |
 | `local-env.bat` | 本机 Go / JDK / SDK 路径，构建脚本自动读取 | 否（有 `.example`） |
 | `SYNCWATCH_SERVER` 环境变量 | 临时覆盖客户端服务器地址（调试用） | — |
@@ -298,25 +338,27 @@ current = position + (now - anchor) * rate      // 仅在 playing 时累加
 
 ## 构建与发布
 
-```bat
-gui\build.bat            :: 编译图形客户端（wails build）
-gui\打包.bat              :: 产出 dist\一起看-windows-v0.5.zip
-windows\build.bat        :: 编译命令行版（注入 server.txt 里的地址）
-windows\打包.bat          :: 产出 dist\一起看-windows-v0.4.zip（含 mpv）
-android\build-apk.bat    :: 产出 dist\一起看-android-v0.4.apk
-server\deploy.sh         :: rsync 到远程主机并 docker compose up
-```
+| 产物 | 命令 | 谁产出 |
+|---|---|---|
+| 服务端二进制 | `cd server && go build -o syncwatch-server .` | 本地 / CI（linux amd64 + arm64） |
+| 图形版 exe | `gui\build.bat`（= `wails build -platform windows/amd64`） | **仅本地** |
+| 图形版 zip | `gui\打包.bat` → `dist\一起看-windows-v0.5.zip` | **仅本地** |
+| 控制台版 zip | `windows\build.bat` + `windows\打包.bat` | 本地 / CI |
+| Android APK | `android\build-apk.bat` → `dist\一起看-android-v0.4.apk` | 本地 / CI |
+| 线上部署 | `server\deploy.sh`（rsync + docker compose） | 仅本地 |
 
-**打 tag 会自动发布**：推 `v0.4` 这类 tag 后，GitHub Actions 会编译服务端（amd64 / arm64）、Windows 客户端、Android APK，组装免安装包，并在 Releases 页面创建对应版本。
+**打 tag 自动发布**：推 `v0.5` 这类 tag 后，GitHub Actions 编译服务端（amd64 / arm64）、控制台版 Windows 包、Android APK，并在 Releases 页面建版本。**图形版不在 CI 范围内**（workflow 里没有 Node + Wails 步骤），要发就本地打包后手动传上去。
 
-发版时版本号要改 4 处，否则会出现"关于里显示 v0.3、包名却是 v0.4"：
+发版时版本号散在 6 处，漏一处就会出现"关于里显示 v0.4、包名却是 v0.5"：
 
 1. `android/app/build.gradle` 的 `versionCode` / `versionName`
 2. `android/build-apk.bat` 的 `set "VER="`
 3. `windows/打包.bat` 的 zip 文件名
 4. `windows/ui.go` 的 `const AppVersion`
+5. `gui/打包.bat` 的 `set "VER="`
+6. `server/main.go` 根路径返回的版本串
 
-外加 `server/main.go` 根路径返回的版本串。
+其中第 5 项目前只影响 zip 名——图形版界面还没放版本号，等加「关于」页时要一并接上。
 
 ## 联调与测试
 
@@ -356,7 +398,7 @@ adb shell am start -n com.syncwatch.app/.MainActivity \
 
 已修复（v0.4）。根因是 mpv 的 `seek` 事件在跳转完成**之前**就发出，事件里带的位置还是旧值 0，被当成用户操作上报，服务器照单全收就把房间位置改成 0。现在改为等 `seeking` 属性变 false 后再读真实位置。
 
-如果你还遇到，先确认两端都是 v0.4 及以上；仍有问题就开日志看 Windows 控制台有没有 `你跳转到了 0.0s`。
+如果你还遇到，先确认两端都是 v0.4 及以上；仍有问题就看日志里有没有 `你跳转到了 0.0s`——控制台版直接看窗口输出，图形版在 `%TEMP%\syncwatch-gui.log`（界面右上角「文档」图标可一键打开）。
 </details>
 
 <details>
@@ -364,7 +406,7 @@ adb shell am start -n com.syncwatch.app/.MainActivity \
 
 已修复（v0.4）。根因是 `mpv` 的 `pause` 是布尔值，代码却用读浮点数的方式去解析，失败后静默返回 0，于是 Windows 永远认为自己"没在暂停"，"播放"分支从不执行。
 
-同样是升级到 v0.4 即可。升级后若仍有问题，检查 mpv 是否被别的进程占用（Windows 端一台机器只能跑一个实例）。
+同样是升级到 v0.4 即可。升级后若仍有问题，检查 mpv 是否被别的进程占用（Windows 端一台机器只能跑一个实例；图形版日志见 `%TEMP%\syncwatch-gui.log`）。
 </details>
 
 <details>
@@ -382,7 +424,7 @@ adb shell am start -n com.syncwatch.app/.MainActivity \
 <details>
 <summary><b>Windows 提示找不到 mpv</b></summary>
 
-`windows/mpv/mpv.exe` 不存在。跑 `windows/fetch-mpv.ps1` 自动下载，或手动把 mpv 解压到 `windows/mpv/`，也可以用 `-mpv "C:\path\mpv.exe"` 指定。
+两个客户端都按 `mpv\mpv.exe`（exe 同目录下的 mpv 文件夹）找播放内核。跑 `windows/fetch-mpv.ps1` 自动下载，或手动解压一份到该目录；控制台版也可以用 `-mpv "C:\path\mpv.exe"` 指定。图形版日志在 `%TEMP%\syncwatch-gui.log`，搜 `mpv` 能看到实际查找路径。
 </details>
 
 <details>
@@ -399,7 +441,7 @@ adb shell am start -n com.syncwatch.app/.MainActivity \
 
 ## 已知限制
 
-- Windows 端一台机器只能跑一个实例（mpv 命名管道被占用）
+- Windows 一台机器只能跑一个实例（mpv 命名管道固定，第二个抢不到）；图形版和控制台版混开也算两个
 - Android 切后台会暂停（未做前台 Service；观影场景本身需要亮屏）
 - 不做视频分发，所有人须自备同一片源
 - 服务端无持久化：房间存在内存里，进程重启即清空；空房间 15 分钟后回收
@@ -411,7 +453,7 @@ adb shell am start -n com.syncwatch.app/.MainActivity \
 - `v0.2` Windows 加入房间入口（此前只能靠命令行 `-room`，双击启动必然各建各的房间）；房间码彩色横幅 + 自动复制；双端「房间不存在」提示；Android 界面改版、修复输入框白字压浅底
 - `v0.3` 房间跨断线保留（15 分钟）；漂移纠偏只发给漂移者；Android 缓冲状态不再被误判成暂停；服务端位置参数校验
 - `v0.4` 双端实机联调：修复 mpv 布尔属性解析错误导致的"远端放音本端不动"、seek 事件取错位置导致的"跳回片头"；成员状态实时上报；纠偏阈值分档
-- `v0.5` Windows 图形客户端：单窗口一体化（视频内嵌、房间码可复制、成员面板、全屏控制条自动隐藏、片源时长提示）；**协议与服务端零改动**
+- `v0.5` Windows 图形客户端：单窗口一体化（视频内嵌、房间码可复制、成员面板、全屏控制条自动隐藏、片源时长提示）；**协议与服务端零改动**。分发包目前需本地打包，CI 仍只产控制台版
 - `v0.6`（计划）房主踢人、房间锁、Android 前台 Service
 - `v0.7`（计划）语音 / 文字聊天（纯信令，成本极低）
 - `v1.0`（计划）一体化安装包、自动更新
