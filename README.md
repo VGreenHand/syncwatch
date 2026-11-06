@@ -83,19 +83,45 @@ cd server && go build -o syncwatch-server . && PORT=8995 ./syncwatch-server
 
 部署细节（镜像源、systemd 常驻、升级、迁移、限流加固）见 [docs/03-服务端部署.md](docs/03-服务端部署.md)。
 
-### 2. Windows 端
+### 2. Windows 端（图形界面）
 
-**最省事**：从 [Releases](https://github.com/yangnicejin/syncwatch/releases) 下载 `syncwatch-windows-portable.zip`（内含 mpv），解压后在 exe 同目录新建 `server.txt`，写一行 `你的IP:8995`，然后双击「启动观影.bat」。
+**最省事**：从 [Releases](https://github.com/yangnicejin/syncwatch/releases) 下载 `syncwatch-windows-portable.zip`（约 50 MB，内含 mpv），解压后双击 `开始一起看.bat`。
 
-**自己编译**：
+首次打开：右上角齿轮 → 填服务器地址（形如 `1.2.3.4:8995`）→ 保存。如果包内自带 `server.txt`，会自动读取，无需手填。
+
+界面流程：
+
+```
+首页填昵称 → 创建房间 / 加入房间 → 选择本地视频 → 进播放页
+播放页：顶部  片名 + 房间码（点击复制）+ 连接状态 + 时间
+        中间  视频（内嵌在同一个窗口里，不是独立窗口）
+        底部  播放/暂停 · 进度 · 倍速 · 音量 · 离开
+        右侧  成员面板（谁在播放、谁在缓冲、片源时长是否一致）
+```
+
+**自己编译**（需要 Go 1.22+、Node 18+、Wails CLI）：
+
+```bat
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+cd gui
+:: 首次准备播放内核（复用 windows 目录里那份）
+powershell -ExecutionPolicy Bypass -File ..\windows\fetch-mpv.ps1
+echo 你的IP:8995 > server.txt
+wails build -platform windows/amd64
+打包.bat                          :: 产出 dist\一起看-windows-v0.5.zip
+```
+
+> 设计与实施记录见 [docs/06-Windows客户端GUI设计.md](docs/06-Windows客户端GUI设计.md)（文末有技术验证结论和踩坑清单）。
+
+**控制台版（保留，专用于排障）**：`windows/` 目录仍是原来的命令行客户端，日志更直白，定位"连不上 / 不同步"更快。
 
 ```bat
 cd windows
-powershell -ExecutionPolicy Bypass -File fetch-mpv.ps1   :: 首次：下载 mpv 到 windows\mpv\
-echo 你的IP:8995 > server.txt
-build.bat                                                :: 需要 Go 1.21+，会把地址编进 exe
-打包.bat                                                  :: 可选：产出 dist\一起看-windows-v0.4.zip
+build.bat        :: 会把 server.txt 里的地址编译进 exe
+启动观影.bat      :: 四步问答：昵称 → 视频路径 → 房间码 → 密码
 ```
+
+命令行参数（两个版本都支持）：
 
 启动后是四步问答：
 
@@ -142,7 +168,7 @@ build-apk.bat            :: 产出 dist\一起看-android-v0.4.apk
 你（房主）                          朋友
 启动 → 房间码直接回车               启动 → 房间码填 6ZJ46H
   ↓                                  ↓
-控制台显示：已创建新房间 6ZJ46H  ──→  加入成功，双方成员列表互相可见
+顶部显示：房间码 6ZJ46H [复制]  ──→  加入成功，双方成员列表互相可见
 （房间码已自动复制到剪贴板）
 ```
 
@@ -170,7 +196,15 @@ syncwatch/
 │   ├── docker-compose.yml
 │   ├── deploy.sh               一键部署到远程主机（rsync + docker compose）
 │   └── .env.example            端口、基础镜像、GOPROXY
-├── windows/                   ← Windows 客户端（Go + mpv JSON IPC）
+├── gui/                       ← Windows 图形客户端（Wails + React + 内嵌 mpv，v0.5 起为默认）
+│   ├── main.go                 Wails 启动配置（透明 WebView2 才能叠控制条）
+│   ├── app.go                  暴露给前端的方法：建房/加入/播放控制/配置
+│   ├── syncclient.go           同步协议（与服务端、Android 完全一致）
+│   ├── player.go               mpv 启停与 JSON IPC
+│   ├── win32.go                mpv 宿主子窗口 + 专用 UI 线程
+│   ├── build.bat / 打包.bat     编译与打分发 zip
+│   └── frontend/               React + TypeScript 界面
+├── windows/                   ← Windows 命令行客户端（保留用于排障）
 │   ├── main.go                 连接、同步逻辑、mpv 事件处理
 │   ├── ui.go                   控制台配色、房间码横幅、剪贴板、窗口标题
 │   ├── build.bat               编译（注入内置服务器地址）
@@ -259,11 +293,15 @@ current = position + (now - anchor) * rate      // 仅在 playing 时累加
 | Kotlin | 1.9.24 | |
 | Media3 | 1.3.1 | ExoPlayer |
 | mpv | 任意较新版本 | Windows 播放内核，`fetch-mpv.ps1` 自动取最新 |
+| Wails | v2.17 | Windows 图形壳（WebView2） |
+| React / Vite | 18 / 7 | 图形界面 |
 
 ## 构建与发布
 
 ```bat
-windows\build.bat        :: 编译 exe（注入 server.txt 里的地址）
+gui\build.bat            :: 编译图形客户端（wails build）
+gui\打包.bat              :: 产出 dist\一起看-windows-v0.5.zip
+windows\build.bat        :: 编译命令行版（注入 server.txt 里的地址）
 windows\打包.bat          :: 产出 dist\一起看-windows-v0.4.zip（含 mpv）
 android\build-apk.bat    :: 产出 dist\一起看-android-v0.4.apk
 server\deploy.sh         :: rsync 到远程主机并 docker compose up
@@ -308,7 +346,7 @@ adb shell am start -n com.syncwatch.app/.MainActivity \
 <details>
 <summary><b>两个人不在同一个房间，各看各的</b></summary>
 
-最常见原因：**两个人都直接回车**，于是各自创建了一个房间。正确流程是——一个人先创建，把控制台醒目打印的 6 位房间码（已自动复制到剪贴板）发给另一个人，后者在「房间码」这一步填进去。
+最常见原因：**两个人都点了「创建房间」**，于是各自建了一间。正确流程是——一个人创建，把播放页顶部显示的 6 位房间码（点一下即复制）发给另一个人，后者走「加入房间」填进去。
 
 如果看到红字「你输入的房间码 XXX 不存在或已解散」，说明码打错了或房间已过期，你其实新建了一个空房。核对后重启即可。Android 端同理，房间码显示在播放页顶部，点一下可复制。
 </details>
@@ -373,8 +411,9 @@ adb shell am start -n com.syncwatch.app/.MainActivity \
 - `v0.2` Windows 加入房间入口（此前只能靠命令行 `-room`，双击启动必然各建各的房间）；房间码彩色横幅 + 自动复制；双端「房间不存在」提示；Android 界面改版、修复输入框白字压浅底
 - `v0.3` 房间跨断线保留（15 分钟）；漂移纠偏只发给漂移者；Android 缓冲状态不再被误判成暂停；服务端位置参数校验
 - `v0.4` 双端实机联调：修复 mpv 布尔属性解析错误导致的"远端放音本端不动"、seek 事件取错位置导致的"跳回片头"；成员状态实时上报；纠偏阈值分档
-- `v0.5`（计划）房主踢人、房间锁、Android 前台 Service
-- `v0.6`（计划）语音 / 文字聊天（纯信令，成本极低）
+- `v0.5` Windows 图形客户端：单窗口一体化（视频内嵌、房间码可复制、成员面板、全屏控制条自动隐藏、片源时长提示）；**协议与服务端零改动**
+- `v0.6`（计划）房主踢人、房间锁、Android 前台 Service
+- `v0.7`（计划）语音 / 文字聊天（纯信令，成本极低）
 - `v1.0`（计划）一体化安装包、自动更新
 
 ## 许可与免责

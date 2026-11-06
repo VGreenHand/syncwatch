@@ -18,6 +18,7 @@ private/
 windows/mpv/
 # 本地服务器地址（含私人 IP，不入库）
 windows/server.txt
+gui/server.txt
 
 # ===== Android =====
 android/.gradle/
@@ -54,3 +55,8 @@ temp/
 *~
 *.swp
 *.bak
+
+# GUI 构建产物与前端依赖
+gui/build/bin/
+gui/frontend/node_modules/
+gui/frontend/dist/
