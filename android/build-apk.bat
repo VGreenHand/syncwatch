@@ -5,13 +5,13 @@ cd /d "%~dp0"
 
 rem ============================================================
 rem  一键构建 Android APK
-rem  产物：..\dist\一起看-android-v0.4.apk
+rem  产物：..\dist\一起看-android-v0.5.1.apk
 rem
 rem  说明：AGP 不接受含中文的项目路径，所以先把源码复制到
 rem        %TEMP%\syncwatch-android-build 再编译。
 rem ============================================================
 
-set "VER=v0.4"
+set "VER=v0.5.1"
 set "BUILD=%TEMP%\syncwatch-android-build"
 
 rem ---------- 0. 载入本机工具链路径（可选） ----------

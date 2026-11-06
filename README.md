@@ -93,8 +93,8 @@ cd server && go build -o syncwatch-server . && PORT=8995 ./syncwatch-server
 | 形态 | 单窗口，mpv 画面内嵌在界面里 | 命令行四步问答 + 独立 mpv 窗口 |
 | 房间码 | 顶部显示，点一下复制 | 控制台彩色横幅 + 自动复制 |
 | 成员 / 片源 | 右侧成员面板，标出谁在缓冲、时长是否一致 | 控制台文字列表 |
-| 分发包 | `一起看-windows-v0.5.1.zip` | `syncwatch-windows-portable.zip` |
-| 谁构建 | 目前需本地打包 | CI 打 tag 时自动构建 |
+| 分发包 | `syncwatch-windows-gui-<版本>.zip`（Releases 里下载，或本地 `一起看-windows-v<版本>.zip`） | `syncwatch-windows-portable.zip` |
+| 谁构建 | 本地打包后手动附到 Release | CI 打 tag 时自动构建 |
 
 #### 图形版（推荐）
 
@@ -111,7 +111,7 @@ build.bat                                                           :: 等价 wa
 
 解压后双击 `开始一起看.bat`。包内若带 `server.txt` 会自动读取；不带则首次打开点右上角齿轮填 `1.2.3.4:8995`，填完可点「测试连接」确认。
 
-> **注意**：Releases 里的 `syncwatch-windows-portable.zip` 是**控制台版**。CI 只装了 Go 和 Android SDK，没有 Node / Wails，因此不产出图形版安装包。想要 CI 也发图形版，得在 workflow 的 windows job 里加 Node + Wails CLI 两步。
+> **注意**：Releases 里的 `syncwatch-windows-portable.zip` 是**控制台版**，自 v0.5 起只作排障兜底。图形版是 `syncwatch-windows-gui-<版本>.zip`，由维护者本地构建后手动附到 Release——CI 只装了 Go 和 Android SDK，没有 Node / Wails。公开的图形版包**不含** `server.txt`，解压后首次启动要自己填服务器地址；需要 CI 也产图形版，得在 workflow 的 windows job 里加 Node + Wails CLI 两步。
 
 界面流程：
 
