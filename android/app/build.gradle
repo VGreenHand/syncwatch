@@ -11,8 +11,8 @@ android {
         applicationId "com.syncwatch.app"
         minSdk 24
         targetSdk 34
-        versionCode 5
-        versionName "0.5.1"
+        versionCode 6
+        versionName "0.5.2-ui"
 
         // 默认服务器地址：写在 local.properties 的 syncwatch.server（该文件不入库）
         // 这样换服务器不用改代码，也不会把私人地址提交到仓库
@@ -42,6 +42,7 @@ dependencies {
     implementation 'androidx.media3:media3-exoplayer:1.3.1'
     implementation 'androidx.media3:media3-ui:1.3.1'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    testImplementation 'junit:junit:4.13.2'
 }
 
 // 读取本机配置：local.properties 中的 syncwatch.server=host:port

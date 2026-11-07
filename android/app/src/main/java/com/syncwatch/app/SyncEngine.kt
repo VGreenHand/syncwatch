@@ -7,6 +7,7 @@ import okhttp3.*
 import okio.ByteString
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -35,6 +36,10 @@ class SyncEngine(
         fun onMembers(members: List<MemberInfo>)
         fun onNotice(text: String)     // 操作归因/系统提示
         fun onDisconnected()
+
+        // 下面是纯 UI 状态通知：不改变协议，也不改变任何同步判定。
+        fun onReconnecting(attempt: Int) {}
+        fun onRemoteSeek(position: Double) {}
     }
 
     companion object {
@@ -120,6 +125,7 @@ class SyncEngine(
             listener.onDisconnected()
             if (reconnectAttempts < RECONNECT_MAX) {
                 reconnectAttempts++
+                listener.onReconnecting(reconnectAttempts)
                 listener.onNotice("连接断开，第 $reconnectAttempts 次重连…")
                 main.postDelayed({
                     if (!closed) connect(roomCode.ifBlank { null }, password)
@@ -162,11 +168,24 @@ class SyncEngine(
                 // 状态变化时严一点（人对播放/暂停敏感），纯位置同步时松一点（避免频繁 seek 卡顿）
                 val threshold = if (stateChanged) 0.5 else 1.0
                 val needSeek = Math.abs(local - pos) > threshold
+                // 房间状态没变但收到回执 = 其它成员调了进度或倍速。通知 UI 取消本地未提交的
+                // 滑动预览，否则用户松手时会把朋友刚调好的进度覆盖回去。
+                if (!stateChanged) listener.onRemoteSeek(pos)
                 roomState = state
                 suppress(400)
                 if (needSeek) player.seekTo(pos)
                 if (state == "playing") player.play(pos, rate) else player.pause(pos)
-                listener.onNotice("$operator ${if (state == "playing") "播放了" else "暂停了"} @${fmt(pos)}")
+                // 服务端 seek 防抖定时器会把最终位置再广播一次（operator 仍是发起者）。
+                // 发起端已经显示过"你跳转到了"，这里不能再说成"某某调整了播放"。
+                if (operator != playerName) {
+                    listener.onNotice(
+                        when {
+                            stateChanged -> "$operator ${if (state == "playing") "播放了" else "暂停了"} @${fmt(pos)}"
+                            needSeek -> "$operator 调整了进度到 ${fmt(pos)}"
+                            else -> "$operator 调整了播放"
+                        }
+                    )
+                }
             }
             "forceSeek" -> {
                 var pos = m.optDouble("position", 0.0)
@@ -174,6 +193,7 @@ class SyncEngine(
                 if (pos.isNaN() || pos < 0 || (pos <= 0.05 && player.currentPos() > 5.0)) {
                     return
                 }
+                listener.onRemoteSeek(pos)
                 suppress(400)
                 player.seekTo(pos)
                 listener.onNotice("服务器纠偏 → ${fmt(pos)}")
@@ -218,6 +238,19 @@ class SyncEngine(
         if (!helloReceived.get() || suppressed()) return
         send(Protocol.seek(pos))
         listener.onNotice("你跳转到了 ${fmt(pos)}")
+    }
+
+    /**
+     * 倍速没有单独协议消息，沿用 play 的 rate 字段：
+     * 只在房间处于播放中时上报，避免暂停时选倍速把全房间意外拉起。
+     * 暂停时设置的倍速会留在本地，下一次 play 时随 rate 一起同步。
+     */
+    fun onLocalRateChanged(rate: Float) {
+        Log.i(TAG, "onLocalRateChanged rate=$rate hello=${helloReceived.get()} roomState=$roomState")
+        if (!helloReceived.get() || suppressed()) return
+        if (roomState != "playing") return
+        send(Protocol.play(player.currentPos(), rate))
+        listener.onNotice("你调整了 ${String.format(Locale.CHINA, "%.2f", rate)}× 倍速")
     }
 
     fun onBufferingChanged(buffering: Boolean) {

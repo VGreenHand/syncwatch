@@ -1,21 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_bg">#1E88E5</color>
+    <color name="ic_launcher_bg">#5368D8</color>
 
-    <!-- 页面与卡片 -->
-    <color name="bg_page">#F2F4F7</color>
-    <color name="bg_card">#FFFFFF</color>
-    <color name="bg_input">#F7F8FA</color>
-    <color name="stroke_input">#E0E4EA</color>
+    <!-- 深色界面令牌 -->
+    <color name="bg_page">#0B0D12</color>
+    <color name="bg_surface">#141824</color>
+    <color name="bg_elevated">#1C2230</color>
+    <color name="bg_input">#0F1320</color>
+    <color name="bg_card">#141824</color>
+    <color name="stroke_subtle">#2A3142</color>
+    <color name="stroke_input">#2A3142</color>
 
-    <!-- 文字：暗色主题 + 浅底会把文字变成看不见的白字，这里统一用深灰 -->
-    <color name="text_primary">#16181D</color>
-    <color name="text_secondary">#8B909A</color>
-    <color name="text_hint">#A9AEB8</color>
+    <!-- 文字 -->
+    <color name="text_primary">#F5F7FF</color>
+    <color name="text_secondary">#A6AEC2</color>
+    <color name="text_hint">#737D92</color>
+    <color name="text_disabled">#596275</color>
 
-    <!-- 品牌色 -->
-    <color name="brand">#4C6FFF</color>
-    <color name="brand_dark">#3B57D6</color>
-    <color name="brand_light">#E8EDFF</color>
-    <color name="ok">#18A058</color>
+    <!-- 品牌与状态 -->
+    <color name="brand">#5368D8</color>
+    <color name="brand_primary">#5368D8</color>
+    <color name="brand_purple">#7656C8</color>
+    <color name="brand_dark">#4053B8</color>
+    <color name="brand_light">#9AA7FF</color>
+    <color name="success">#35D49A</color>
+    <color name="ok">#35D49A</color>
+    <color name="warning">#F6C85F</color>
+    <color name="error">#FF6B7A</color>
+
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="transparent">#00000000</color>
+    <color name="scrim">#99000000</color>
+    <color name="scrim_soft">#66000000</color>
+    <color name="control_surface">#B81C2230</color>
+    <color name="divider">#242B3B</color>
 </resources>

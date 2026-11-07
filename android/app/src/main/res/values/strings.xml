@@ -1,4 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">一起看</string>
+    <string name="brand_latin">SYNCWATCH</string>
+    <string name="brand_tagline">各自本地片源，此刻同步观看</string>
+    <string name="mode_create">创建房间</string>
+    <string name="mode_join">加入房间</string>
+    <string name="label_nickname">你的昵称</string>
+    <string name="hint_nickname">例如：小明</string>
+    <string name="label_room_code">房间码</string>
+    <string name="hint_room_code">输入朋友发来的 6 位房间码</string>
+    <string name="label_video">本地视频</string>
+    <string name="pick_video">选择视频</string>
+    <string name="pick_video_hint">需与好友使用同一片源</string>
+    <string name="action_create_start">创建并开始观看</string>
+    <string name="action_join">加入房间</string>
+    <string name="advanced_settings">高级设置 · 服务器地址</string>
+    <string name="privacy_note">视频只在本地播放，不上传任何文件</string>
+    <string name="leave_room">离开房间</string>
+    <string name="copy">复制</string>
+    <string name="members">成员</string>
+    <string name="fullscreen">全屏</string>
+    <string name="speed">倍速</string>
 </resources>

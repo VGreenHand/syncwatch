@@ -1,22 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 次按钮：白底 + 品牌色描边 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
-            <solid android:color="@color/brand_light" />
-            <corners android:radius="12dp" />
+            <solid android:color="#262F49" />
+            <corners android:radius="@dimen/radius_button" />
             <stroke
                 android:width="1dp"
-                android:color="@color/brand" />
+                android:color="@color/brand_light" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="@color/bg_card" />
-            <corners android:radius="12dp" />
+            <solid android:color="@color/bg_input" />
+            <corners android:radius="@dimen/radius_button" />
             <stroke
                 android:width="1dp"
-                android:color="@color/stroke_input" />
+                android:color="@color/stroke_subtle" />
         </shape>
     </item>
 </selector>

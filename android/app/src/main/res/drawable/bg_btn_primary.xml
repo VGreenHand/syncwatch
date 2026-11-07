@@ -1,22 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 主按钮：品牌色填充，按下变深 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_enabled="false">
         <shape android:shape="rectangle">
-            <solid android:color="#C7CEE0" />
-            <corners android:radius="12dp" />
+            <solid android:color="#3B4356" />
+            <corners android:radius="@dimen/radius_button" />
         </shape>
     </item>
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
-            <solid android:color="@color/brand_dark" />
-            <corners android:radius="12dp" />
+            <gradient
+                android:angle="0"
+                android:endColor="@color/brand_dark"
+                android:startColor="#465AC4" />
+            <corners android:radius="@dimen/radius_button" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="@color/brand" />
-            <corners android:radius="12dp" />
+            <gradient
+                android:angle="0"
+                android:endColor="@color/brand_purple"
+                android:startColor="@color/brand_primary" />
+            <corners android:radius="@dimen/radius_button" />
         </shape>
     </item>
 </selector>

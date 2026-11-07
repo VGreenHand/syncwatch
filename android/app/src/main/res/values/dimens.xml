@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="space_xs">4dp</dimen>
+    <dimen name="space_s">8dp</dimen>
+    <dimen name="space_m">12dp</dimen>
+    <dimen name="space_l">16dp</dimen>
+    <dimen name="space_xl">20dp</dimen>
+    <dimen name="space_2xl">24dp</dimen>
+
+    <dimen name="radius_card">20dp</dimen>
+    <dimen name="radius_input">14dp</dimen>
+    <dimen name="radius_button">14dp</dimen>
+    <dimen name="radius_pill">999dp</dimen>
+
+    <dimen name="touch_target">48dp</dimen>
+    <dimen name="home_card_max_width">560dp</dimen>
+    <dimen name="member_drawer_max_width">360dp</dimen>
+    <dimen name="player_side_width">340dp</dimen>
+</resources>
