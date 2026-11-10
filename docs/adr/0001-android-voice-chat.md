@@ -43,7 +43,8 @@ Windows 端暂不加入语音；未来如果要做，可复用同一套 LiveKit 
 ### 3. 语音房间与 SyncWatch 房间绑定
 
 - LiveKit room name 直接使用 SyncWatch 的 6 位房间码。
-- LiveKit participant identity 使用房间内唯一的昵称。
+- LiveKit participant identity 使用「昵称 + 会话后缀」（如 `小明#a3f9`），保证同一房间内唯一；界面仍显示昵称。
+- 后缀在每次 `join` 时生成，重连换新；不复用旧连接的身份。
 - 只有成功加入 SyncWatch 房间的成员才应获得语音 token。
 - 语音 token 的权限限定为：加入指定房间、发布音频、订阅音频；不授予视频、录制或管理员权限。
 

@@ -14,10 +14,10 @@
 | 最后更新 | 2026-11-10 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（文档头 `32ff2fe`；`fork/main` 已含 ADR 与交接账本；开工前 `git merge main`） |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.4 已验收；T1–T5 未开始〔流水 12.4〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.5 已验收；T1–T5 未开始〔流水 12.5〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.4（2026-11-10） |
-| 下一步 | 完成开工前文档/设计口径修正 → T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.4〕 |
+| 最近刷新 | 流水 12.5（2026-11-10） |
+| 下一步 | 完成开工前文档/设计口径修正 → T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.5〕 |
 | 开放决策 | 见 §9 待定表（LiveKit 版本、TLS、流量阈值、机型清单等） |
 | 已验证 | 源码通读（v0.5.1）、服务器只读检查、ADR/交接账本随本次提交入 `fork/main` |
 | 未验证 | 未编译、未上真机、未部署 LiveKit |
@@ -39,7 +39,7 @@
 |---|---|---|
 | 1 | 语音是 **fork 的可选扩展层**，独立容器，不进 `syncwatch` 核心进程 | 隔离故障域；不装 LiveKit 时 fork 行为与上游一致 |
 | 2 | Android 用原生 LiveKit SDK，不用 WebView | 后台音频和麦克风生命周期可控 |
-| 3 | LiveKit room = 6 位房间码；identity = 昵称；token 只给音频收发 | 复用现有房间模型，权限最小化 |
+| 3 | LiveKit room = 6 位房间码；identity = 昵称 + 会话后缀；token 只给音频收发 | 复用现有房间模型，避免重连/同名冲突，权限最小化 |
 | 4 | MVP 由 `hello` 下发 `voiceUrl` + 6 小时 token | 少一个接口；URL 与 token 同生同灭；过期重连再取 |
 | 5 | 只开 7880/tcp、7881/tcp、7882/udp，3478/udp 仅 TURN | 避免整段 UDP 暴露 |
 | 6 | 切后台关麦、继续收听；无耳机不许开麦 | 隐私与回授风险 |
@@ -147,7 +147,7 @@ docker compose version # 服务器上需要
 - `server/main.go` 的 `Msg` 结构体（第 38 行起）增加 `VoiceUrl` 与 `VoiceToken` 字段，JSON tag 用 `json:"voiceUrl,omitempty"` / `json:"voiceToken,omitempty"`
 - 仅在配置了 `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` 时生成；缺失时两个字段都不下发，客户端隐藏语音入口
 - 在 `hello` 消息（第 446 行）里带上；`voiceUrl` 原样取 `LIVEKIT_URL`
-- **完成标准**：模拟 join 时 `hello` 含 `voiceUrl` 与 token；解码后 room = 房间码、identity = 昵称、有效期 6h、只含音频收发权限
+- **完成标准**：模拟 join 时 `hello` 含 `voiceUrl` 与 token；解码后 room = 房间码、identity = 昵称 + 会话后缀、有效期 6h、只含音频收发权限
 
 ### T3 Android 接入
 
@@ -256,3 +256,11 @@ docker compose version # 服务器上需要
 - 内容：`hello` 同时下发 `voiceUrl` 与 `voiceToken`；两者仅在 LiveKit 三个环境变量齐全时出现，缺一不下发；URL 非秘密，token 为 bearer 凭证。
 - 证据：`docs/adr/0001-android-voice-chat.md` 决策 4；`docs/branches/android-voice/02-voice-protocol.md`；`PROGRESS.md` §3、§7、§8。
 - 决策：客户端用 `voiceUrl` 连接 LiveKit，不再从信令地址硬编码推导。
+
+### 12.5 — 2026-11-10 语音 identity 改为昵称 + 会话后缀
+
+- 类型：设计
+- 状态：✅ 已验收（维护者，2026-11-10）
+- 内容：LiveKit identity 不再直接使用昵称，改为「昵称 + 每次 join 生成的短后缀」；界面仍显示昵称。避免断线重连或昵称释放后与旧 LiveKit 连接冲突。
+- 证据：`docs/adr/0001-android-voice-chat.md` 决策 3；`docs/branches/android-voice/02-voice-protocol.md` token 约束；`PROGRESS.md` §3、T2 完成标准。
+- 决策：后缀只影响 LiveKit 内部身份，不改变用户可见昵称；每次 join 重新生成。
