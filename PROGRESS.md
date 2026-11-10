@@ -1,20 +1,31 @@
-# 语音功能开发交接
+# SyncWatch 进度账本（v0.6 Android 语音）
 
-> 接手顺序：本文件 → [`docs/adr/0001-android-voice-chat.md`](docs/adr/0001-android-voice-chat.md) → `docs/02-同步协议.md`。
-> 本文件只记「现在在哪、下一步做什么、哪些还没验证」，设计理由不在这里重复。
+> 本文件是当前工作线的唯一状态账本（契约见 [`.agents/skills/session-handover/SKILL.md`](.agents/skills/session-handover/SKILL.md)）。
+> 接力顺序：§0 → [`docs/adr/0001-android-voice-chat.md`](docs/adr/0001-android-voice-chat.md) → `docs/02-同步协议.md` → §7 当前任务。
+> 本文件只记「现在在哪、下一步做什么、哪些还没验证」；设计理由在 ADR，实现事实在 `docs/`。
+> 状态机：⬜ 未开始 → 🚧 实现中 → ⏸ 阻塞(等待 X) → 🔶 待验收 → ✅ 已验收。
+
+## 0. 会话入口
+
+> 路由器：只存指针与唯一值；动态值标〔流水 12.N〕。落后于最新流水时以流水为准，只报告不擅改。
 
 | 项 | 值 |
 |---|---|
-| 最后更新 | 2026-11-06 |
-| 分支 | `feat/android-voice`（基线 `bf3fa8e`，v0.5.2-ui） |
-| 状态 | 文档已入 `main`；设计待维护者评审；功能代码 0 行 |
-| 当前占用 | Windows 开发机，工作区 `D:\Work\Agent-Codex\work\syncwatch` |
-| 已验证 | 源码通读（v0.5.1）、服务器只读检查、文档已推送 `fork/main` |
+| 最后更新 | 2026-11-10 |
+| 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
+| 分支 / 基线 | `feat/android-voice`（文档头 `32ff2fe`；`fork/main` 已含 ADR 与交接账本；开工前 `git merge main`） |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.2 已验收；T1–T5 未开始〔流水 12.2〕 |
+| 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
+| 最近刷新 | 流水 12.2（2026-11-10） |
+| 下一步 | fork 内开始 T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.2〕 |
+| 开放决策 | 见 §9 待定表（LiveKit 版本、TLS、流量阈值、机型清单等） |
+| 已验证 | 源码通读（v0.5.1）、服务器只读检查、ADR/交接账本随本次提交入 `fork/main` |
 | 未验证 | 未编译、未上真机、未部署 LiveKit |
+| 导航 | 本表 → ADR → `docs/02` → §7 当前任务行；历史见 §12 |
 
 ## 1. 目标
 
-给 Android 客户端加内置语音（目标 v0.6）：两人看同一部片时全双工对话，语音房间直接复用 SyncWatch 的 6 位房间码，不额外装语音软件。
+给 fork 的 Android 客户端加内置语音（fork 目标 v0.6；上游版本号待定）：两人看同一部片时全双工对话，语音房间直接复用 SyncWatch 的 6 位房间码，不额外装语音软件。本扩展不改变上游核心设计。
 
 ## 2. 边界
 
@@ -22,11 +33,11 @@
 
 不做：Windows 内置语音、视频/屏幕传输、客户端 P2P、云端录像、5 人混音、语音转文字、语音消息。
 
-## 3. 已定决策
+## 3. Fork 已定决策（ADR 仍 Proposed，上游待确认）
 
 | # | 决策 | 理由（详见 ADR） |
 |---|---|---|
-| 1 | 语音是**可选伴生服务**，独立容器，不进 `syncwatch` 核心进程 | 隔离故障域；不装 LiveKit 时项目功能不退化 |
+| 1 | 语音是 **fork 的可选扩展层**，独立容器，不进 `syncwatch` 核心进程 | 隔离故障域；不装 LiveKit 时 fork 行为与上游一致 |
 | 2 | Android 用原生 LiveKit SDK，不用 WebView | 后台音频和麦克风生命周期可控 |
 | 3 | LiveKit room = 6 位房间码；identity = 昵称；token 只给音频收发 | 复用现有房间模型，权限最小化 |
 | 4 | MVP 由 `hello` 直接下发 6 小时 token | 少一个接口；过期重连再取 |
@@ -34,22 +45,11 @@
 | 6 | 切后台关麦、继续收听；无耳机不许开麦 | 隐私与回授风险 |
 | 7 | 不做主动 ducking；按量流量设告警，超限停语音 | 不干扰观影；控制账单 |
 
-**需要维护者单独点头的一条**：项目定位从「单二进制、纯信令、零媒体流量」变成「核心信令 + 可选媒体服务」。这是 ADR 的核心，PR 描述里要单独提。
+**需要主项目维护者单独点头的一条**：fork 启用语音后，从「单二进制、纯信令、零媒体流量」变成「核心信令 + 可选媒体面」；上游项目定位不变，合并 PR 时单独说明。
 
-## 4. 进度
+## 4. 进度（静态背景）
 
-已完成：
-
-- ADR 0001 草案（状态 Proposed）
-- 本交接文档
-
-未开始：
-
-- `voice/` Docker Compose 与 LiveKit 配置
-- 服务器生成语音 token
-- Android 权限、前台服务、耳机检测、LiveKit SDK 接入
-- 双机真机验证
-- `docs/02`、`docs/05`、`README` 的语音章节
+截至 2026-11-06：ADR 0001 草案（状态 Proposed）与本交接文档已完成；功能代码未开始。此后进度只写 §0 入口与 §12 流水，本节不再更新。
 
 ### 基线变更（2026-11-07，上游 `940adf8`）
 
@@ -60,7 +60,7 @@
 - `SyncEngine.kt` 有小改（+34/-1），`hello` 解析位置从第 133 行移到第 139 行。
 - 服务端 `server/main.go` 未变，`Msg` 结构体仍在第 38 行。
 
-结论：`feat/android-voice` 已包含 `main` 的文档提交；开始写 T3 前先 `git merge main`（或 rebase）到最新代码，再按新结构接入。
+结论：`feat/android-voice` 已包含 `main` 的文档提交；开始写 T3 前先 `git merge main` 到最新代码，再按新结构接入。
 
 ## 5. 环境事实
 
@@ -100,7 +100,10 @@ git switch feat/android-voice
 
 # 以后每次开工
 git fetch origin
-git pull --rebase
+git pull --ff-only
+
+# 落后 main 时
+git merge main
 ```
 
 如果分支还没推到 GitHub，先在原机器执行（fork 后）：
@@ -118,9 +121,19 @@ adb devices            # 需要至少一台真机
 docker compose version # 服务器上需要
 ```
 
-然后按 T1 → T2 → T3 → T4 → T5 顺序做，不要跳。
+开工前按 [`.agents/skills/session-handover/SKILL.md`](.agents/skills/session-handover/SKILL.md) 的启动协议读 §0。然后按 T1 → T2 → T3 → T4 → T5 顺序做，不要跳。
 
 ## 7. 任务清单
+
+任务状态总表（收尾时翻转对应行；详细完成标准见下方）：
+
+| 任务 | 状态 | 完成标准（摘要） | 证据 |
+|---|---|---|---|
+| T1 LiveKit 独立部署 | ⬜ 未开始 | `docker compose up -d` 后能进房并听到回声测试音 | 待补 |
+| T2 服务器下发 token | ⬜ 未开始 | `hello` 含 6h 音频 token，权限与房间/昵称匹配 | 待补 |
+| T3 Android 接入 | ⬜ 未开始 | 单机能进语音房并听到远端；拔耳机立即关麦 | 待补 |
+| T4 双机联调 | ⬜ 未开始 | ADR 验收标准逐条通过并记录机型/网络 | 待补 |
+| T5 文档 | ⬜ 未开始 | `docs/02`、`docs/05`、`README` 补齐 v0.6 说明 | 待补 |
 
 ### T1 LiveKit 独立部署
 
@@ -162,7 +175,7 @@ docker compose version # 服务器上需要
 - Android 用 `org.json` + `optString` 解析（`android/app/src/main/java/com/syncwatch/app/SyncEngine.kt:139`），未知字段本来就会被忽略
 - Windows 端同理，T2 时再确认一次即可
 
-因此语音 PR 只改 `server/`、`android/`、`docs/`，不动 Windows 客户端。这不违反 README 第 318 行「改协议必须五处同步」——那条针对**语义变更**，这次是**新增可选字段**。PR 里要写明这个区别。
+因此语音 PR 只改 `server/`、`android/`、`docs/`，不动 Windows 客户端。这不违反 README「协议速查」的「改协议必须五处同步」——那条针对**语义变更**，这次是**新增可选字段**。PR 里要写明这个区别。
 
 ## 9. 待定
 
@@ -174,12 +187,12 @@ docker compose version # 服务器上需要
 | 流量告警阈值 | 按量计费，T1 部署后按实际码率估算 |
 | 需要覆盖的机型/厂商 | T4 前列清单 |
 | 本文件合并前是否删除 | 建议保留到 v0.6 发布 |
-| 仓库级 `AGENTS.md` | 暂不做，等用户提供模板 |
+| 仓库级 `AGENTS.md` | 已建立（2026-11-10）；项目红线、文档权威链与会话交接条款见根目录 |
 
 ## 10. 多机协作规则
 
-- 一条分支同一时间只在一台机器上活跃；换机前 commit + push，并更新本文件顶部「当前占用」
-- 开工前 `git fetch && git pull --rebase`
+- 一条分支同一时间只在一台机器上活跃；换机前 commit + push，并更新 §0「当前占用」
+- 开工前 `git fetch && git pull --ff-only`（共享分支不改写历史；落后 `main` 时用 `git merge main`）
 - 不对共享分支 `push --force`；分支名按任务起，不按机器起
 - 密钥只放服务器 `.env` 或本机 `private/`；仓库里只放 `.example`
 - 两台机器统一 JDK 17 / SDK 34 / Gradle 8.7，否则会出现「我这儿能编译」
@@ -192,6 +205,35 @@ docker compose version # 服务器上需要
 | `README.md` | 项目总览、构建、协议红线 |
 | `docs/01-方案设计.md` | 整体架构与「不做视频分发」的边界 |
 | `docs/02-同步协议.md` | WebSocket 消息格式与状态机 |
+| `docs/03-服务端部署.md` | Docker / systemd 部署、端口、运维与排障 |
+| `docs/04-Windows客户端.md` | Windows 控制台版（排障用） |
 | `docs/05-Android客户端.md` | Android 构建、配置、已知限制 |
+| `docs/06-Windows客户端GUI设计.md` | Windows 图形版设计与实施记录 |
+| `docs/07-Android客户端现代化UI设计.md` | Android UI 设计目标与规范 |
+| `docs/08-Android客户端现代化UI实施.md` | Android UI 实施边界、阶段与验收矩阵 |
 | `docs/adr/0001-android-voice-chat.md` | 语音方案的全部决策与验收标准 |
+| `AGENTS.md` | 仓库级 agent 规则：红线、权威链、会话交接、代码变更纪律、验证约定 |
+| `.agents/skills/session-handover/SKILL.md` | 会话级交接流程（本项目特化） |
+| `.agents/skills/ledger-rotation/SKILL.md` | 里程碑级账本轮转与保留 |
 | `PROGRESS.md` | 本文件：当前进度与交接 |
+
+## 12. 交接流水
+
+> 每次收尾追加一条 `### 12.N — 标题`；N 连续、只增，轮转不改号。证据写在本条内：commit / PR / 构建产物 / 真机或服务器记录。
+> 历史索引（轮转后维护）：暂无。
+
+### 12.1 — 2026-11-10 建立会话交接账本
+
+- 类型：流程 / 文档
+- 状态：✅ 已验收（维护者，2026-11-10）
+- 内容：新增 §0 入口节、§7 任务状态总表、§12 流水；安装 `session-handover` 与 `ledger-rotation`；新增仓库级 `AGENTS.md`，并按 `karpathy-guidelines` 补「代码变更纪律」。
+- 证据：本条所在收尾 commit（`git log -1 -- PROGRESS.md`）；ADR、`AGENTS.md`、`.agents/skills` 一并入库。
+- 决策：账本固定为 `PROGRESS.md`；流水前缀 `### 12.`；轮转阈值 40 条或 60 KB，保留最近约 20 条。
+
+### 12.2 — 2026-11-10 明确 fork 边界与上游合并策略
+
+- 类型：范围 / 流程
+- 状态：✅ 已验收（维护者，2026-11-10）
+- 内容：语音仅作为 fork 扩展；不改变上游 README 红线、`docs/01` 范围与版本路线图；未配置 LiveKit 时行为与上游一致；ADR 保持 `Proposed`，上游合并前由主项目维护者确认。
+- 证据：`docs/adr/0001-android-voice-chat.md` 标题/状态/适用范围/决策 1；`PROGRESS.md` §0、§1、§3。
+- 决策：T1–T4 在 fork 验证；验证后从 fork 向 `origin/main` 提 PR；当前无上游写权限，合并由主项目维护者执行；PR 只带语音代码与必要文档，不带 `AGENTS.md`、`.agents/`、`PROGRESS.md`。
