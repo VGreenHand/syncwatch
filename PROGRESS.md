@@ -6,10 +6,10 @@
 | 项 | 值 |
 |---|---|
 | 最后更新 | 2026-11-06 |
-| 分支 | `feat/android-voice`（基于 `f0e4a34`，v0.5.1） |
-| 状态 | 设计待维护者评审；功能代码 0 行 |
+| 分支 | `feat/android-voice`（基线 `bf3fa8e`，v0.5.2-ui） |
+| 状态 | 文档已入 `main`；设计待维护者评审；功能代码 0 行 |
 | 当前占用 | Windows 开发机，工作区 `D:\Work\Agent-Codex\work\syncwatch` |
-| 已验证 | 源码通读、服务器只读检查 |
+| 已验证 | 源码通读（v0.5.1）、服务器只读检查、文档已推送 `fork/main` |
 | 未验证 | 未编译、未上真机、未部署 LiveKit |
 
 ## 1. 目标
@@ -50,6 +50,17 @@
 - Android 权限、前台服务、耳机检测、LiveKit SDK 接入
 - 双机真机验证
 - `docs/02`、`docs/05`、`README` 的语音章节
+
+### 基线变更（2026-11-07，上游 `940adf8`）
+
+设计基于 v0.5.1（`f0e4a34`）做出，上游随后提交了 `940adf8`「Android 现代化 UI 与播放手势重做（v0.5.2-ui）」，版本号已到 `0.5.2-ui`（versionCode 6）。对本方案的影响：
+
+- 设计决策全部不变：信令/媒体分离、LiveKit、token、后台与耳机策略都与 UI 无关。
+- Android 接入点变了：`MainActivity.kt` 重写（约 1300 行改动），新增 `PlayerControlOverlay.kt`、`PlayerGestureController.kt`、`SeekPreviewCalculator.kt`。语音按钮和状态应挂在新版播放控制层，不要按 v0.5.1 的布局写。
+- `SyncEngine.kt` 有小改（+34/-1），`hello` 解析位置从第 133 行移到第 139 行。
+- 服务端 `server/main.go` 未变，`Msg` 结构体仍在第 38 行。
+
+结论：`feat/android-voice` 已包含 `main` 的文档提交；开始写 T3 前先 `git merge main`（或 rebase）到最新代码，再按新结构接入。
 
 ## 5. 环境事实
 
@@ -120,7 +131,7 @@ docker compose version # 服务器上需要
 
 ### T2 服务器下发 token
 
-- `server/main.go` 的 `Msg` 结构体（第 39 行起）增加 `VoiceToken` 字段，JSON tag 用 `json:"voiceToken,omitempty"`
+- `server/main.go` 的 `Msg` 结构体（第 38 行起）增加 `VoiceToken` 字段，JSON tag 用 `json:"voiceToken,omitempty"`
 - 仅在配置了 `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` 时生成；缺失时字段留空，客户端隐藏语音入口
 - 在 `hello` 消息（第 446 行）里带上
 - **完成标准**：模拟 join 时 `hello` 含 token；解码后 room = 房间码、identity = 昵称、有效期 6h、只含音频收发权限
@@ -147,8 +158,8 @@ docker compose version # 服务器上需要
 
 `hello` 增加字段不会破坏旧客户端：
 
-- 服务端是单个扁平 `Msg` 结构体（`server/main.go:39`），新增字段只影响新字段
-- Android 用 `org.json` + `optString` 解析（`android/app/src/main/java/com/syncwatch/app/SyncEngine.kt:133`），未知字段本来就会被忽略
+- 服务端是单个扁平 `Msg` 结构体（`server/main.go:38`），新增字段只影响新字段
+- Android 用 `org.json` + `optString` 解析（`android/app/src/main/java/com/syncwatch/app/SyncEngine.kt:139`），未知字段本来就会被忽略
 - Windows 端同理，T2 时再确认一次即可
 
 因此语音 PR 只改 `server/`、`android/`、`docs/`，不动 Windows 客户端。这不违反 README 第 318 行「改协议必须五处同步」——那条针对**语义变更**，这次是**新增可选字段**。PR 里要写明这个区别。
