@@ -13,7 +13,7 @@
 |---|---|
 | 最后更新 | 2026-11-10 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
-| 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；本地领先 `fork/feat/android-voice` 15 个提交，未 push） |
+| 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；本地领先 `fork/feat/android-voice`，未 push） |
 | 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.14 已验收；开工前设计口径完成；T1–T5 未开始〔流水 12.14〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
 | 最近刷新 | 流水 12.14（2026-11-10） |
@@ -344,5 +344,5 @@ docker compose version # 服务器上需要
 - 类型：流程 / 设计收尾
 - 状态：✅ 已验收（维护者，2026-11-10）
 - 内容：开工前设计与文档口径已收尾；开发计划保存于 ADR、`docs/branches/android-voice/` 的 README/02/03/05 与 §7 任务表；T1–T5 未开始。
-- 证据：`git ls-files` 确认 ADR、`CONTEXT.md`、`docs/branches/android-voice/` 四份文档、`AGENTS.md`、`PROGRESS.md` 均已入库；工作区干净；本地领先 `fork/feat/android-voice` 15 个提交，未 push。
+- 证据：`git ls-files` 确认 ADR、`CONTEXT.md`、`docs/branches/android-voice/` 四份文档、`AGENTS.md`、`PROGRESS.md` 均已入库；工作区干净；本地领先 `fork/feat/android-voice`，未 push。
 - 决策：下一步 T1；未编译、未上真机、未部署 LiveKit。
