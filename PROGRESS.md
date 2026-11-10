@@ -14,10 +14,10 @@
 | 最后更新 | 2026-11-10 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（文档头 `32ff2fe`；`fork/main` 已含 ADR 与交接账本；开工前 `git merge main`） |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.9 已验收；T1–T5 未开始〔流水 12.9〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.10 已验收；T1–T5 未开始〔流水 12.10〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.9（2026-11-10） |
-| 下一步 | 编写 `voice/` Compose 并在服务器跑 T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.9〕 |
+| 最近刷新 | 流水 12.10（2026-11-10） |
+| 下一步 | 编写 `voice/` Compose 并在服务器跑 T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.10〕 |
 | 开放决策 | 见 §9 待定表（LiveKit 版本、TLS、流量阈值、机型清单等） |
 | 已验证 | 源码通读（v0.5.1）、服务器只读检查、ADR/交接账本随本次提交入 `fork/main` |
 | 未验证 | 未编译、未上真机、未部署 LiveKit |
@@ -38,11 +38,11 @@
 | # | 决策 | 理由（详见 ADR） |
 |---|---|---|
 | 1 | 语音是 **fork 的可选扩展层**，独立容器，不进 `syncwatch` 核心进程 | 隔离故障域；不装 LiveKit 时 fork 行为与上游一致 |
-| 2 | Android 用原生 LiveKit SDK，不用 WebView | 后台音频和麦克风生命周期可控 |
+| 2 | Android 用原生 LiveKit SDK，不用 WebView | 麦克风、音频路由和生命周期可控 |
 | 3 | LiveKit room = 6 位房间码；identity = 昵称 + 会话后缀；token 只给音频收发 | 复用现有房间模型，避免重连/同名冲突，权限最小化 |
 | 4 | MVP 由 `hello` 下发 `voiceUrl` + 6 小时 token；仅两人私有使用 | 少一个接口；URL 与 token 同生同灭；6h 覆盖一次观看 |
 | 5 | 只开 7880/tcp、7881/tcp、7882/udp，3478/udp 仅 TURN | 避免整段 UDP 暴露 |
-| 6 | 切后台关麦、继续收听；无耳机不许开麦 | 隐私与回授风险 |
+| 6 | 切后台暂停视频并断开语音；分屏只关麦；无耳机不许开麦 | 隐私、回授与实现成本 |
 | 7 | 不做主动 ducking；按量流量设告警，超限停语音 | 不干扰观影；控制账单 |
 
 **需要主项目维护者单独点头的一条**：fork 启用语音后，从「单二进制、纯信令、零媒体流量」变成「核心信令 + 可选媒体面」；上游项目定位不变，合并 PR 时单独说明。
@@ -131,7 +131,7 @@ docker compose version # 服务器上需要
 |---|---|---|---|
 | T1 LiveKit 独立部署 | ⬜ 未开始 | `docker compose up -d` 后能进房并听到回声测试音 | 待补 |
 | T2 服务器下发 token | ⬜ 未开始 | `hello` 含 `voiceUrl` 与 6h 音频 token，权限与房间/昵称匹配 | 待补 |
-| T3 Android 接入 | ⬜ 未开始 | 单机能进语音房并听到远端；拔耳机立即关麦 | 待补 |
+| T3 Android 接入 | ⬜ 未开始 | 单机能进语音房并听到远端；切后台断开，分屏只关麦，拔耳机立即关麦 | 待补 |
 | T4 双机联调 | ⬜ 未开始 | ADR 验收标准逐条通过并记录机型/网络 | 待补 |
 | T5 文档 | ⬜ 未开始 | fork 文档目录补齐语音说明；上游 docs/README 原文不动 | 待补 |
 
@@ -155,7 +155,8 @@ docker compose version # 服务器上需要
 ### T3 Android 接入
 
 - Manifest：`RECORD_AUDIO`、`POST_NOTIFICATIONS`、`FOREGROUND_SERVICE_MICROPHONE`（API 34）
-- 前台服务 + 常驻通知；切后台 `setMicrophoneEnabled(false)`、保持订阅
+- 不做前台 Service；`onPause` 关麦，`onStop` 暂停视频并断开 LiveKit
+- 分屏用 `isInMultiWindowMode()` 区分；保持视频与远端音频
 - 耳机输出检测：没有耳机时禁止开麦、但可收听
 - **完成标准**：单机能进语音房、能听到远端；拔耳机立即关麦
 
@@ -184,7 +185,7 @@ docker compose version # 服务器上需要
 
 | 问题 | 现状 / 建议 |
 |---|---|
-| 现有 Android 切后台会暂停播放，且没有前台服务（见 `docs/05` 已知限制）。语音要后台继续收听，是否同时保持后台播放？ | 建议只保语音、视频照旧暂停，避免扩大改动；真机验证后再定 |
+| Android 切后台/分屏时视频与语音怎么处理？ | 已定：切后台暂停视频并断开语音；分屏失去焦点只关麦，视频与远端音频继续；后台语音留待后续迭代 |
 | 域名与 TLS | 暂不对外；实验期用 `ws://`；对外前必须加 TLS，并重估 TTL/房间复用/token 接口 |
 | LiveKit 镜像版本 | 已定 `v1.13.11`（2026-10-25 release）；升级前跑 T1 回声 + T4 双机回归 |
 | LiveKit 容器网络 | 使用 host；`syncwatch` 保持现有部署，不使用 bridge 端口映射 |
@@ -221,6 +222,7 @@ docker compose version # 服务器上需要
 | `docs/branches/android-voice/README.md` | fork 语音扩展的范围、文档索引与上游关系 |
 | `docs/branches/android-voice/02-voice-protocol.md` | `hello` 的 `voiceUrl` / `voiceToken` 扩展 |
 | `docs/branches/android-voice/03-voice-deploy.md` | LiveKit 同机部署、端口、NAT 与排障 |
+| `docs/branches/android-voice/05-android-voice.md` | Android 生命周期、分屏、音频焦点与后续后台语音 |
 | `.agents/skills/session-handover/SKILL.md` | 会话级交接流程（本项目特化） |
 | `.agents/skills/ledger-rotation/SKILL.md` | 里程碑级账本轮转与保留 |
 | `PROGRESS.md` | 本文件：当前进度与交接 |
@@ -301,3 +303,11 @@ docker compose version # 服务器上需要
 - 内容：LiveKit 容器使用 `network_mode: host`，直接绑定 7880/7881/7882；`syncwatch` 保持现有部署方式；不使用 bridge 端口映射。
 - 证据：`docs/adr/0001-android-voice-chat.md` 决策 5；`docs/branches/android-voice/03-voice-deploy.md`；`PROGRESS.md` T1、§9。
 - 决策：减少 WebRTC UDP 的 NAT 层，接受 host 网络隔离较弱的代价。
+
+### 12.10 — 2026-11-10 确定 Android 分屏/后台生命周期
+
+- 类型：Android / 设计
+- 状态：✅ 已验收（维护者，2026-11-10）
+- 内容：第一版不做后台语音；`onPause` 关闭麦克风但保持视频与远端音频，`onStop` 暂停视频并断开 LiveKit；回前台恢复视频并重连语音。分屏用 `isInMultiWindowMode()` 区分。
+- 证据：`docs/adr/0001-android-voice-chat.md` 产品约束、决策 6、验收标准；`docs/branches/android-voice/05-android-voice.md`；`PROGRESS.md` T3、§9。
+- 决策：后续若做后台语音，再把语音会话抽成独立控制器并包进前台 Service；协议与服务端无需改动。
