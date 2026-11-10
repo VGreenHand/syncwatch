@@ -14,10 +14,10 @@
 | 最后更新 | 2026-11-10 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（文档头 `32ff2fe`；`fork/main` 已含 ADR 与交接账本；开工前 `git merge main`） |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.2 已验收；T1–T5 未开始〔流水 12.2〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.3 已验收；T1–T5 未开始〔流水 12.3〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.2（2026-11-10） |
-| 下一步 | fork 内开始 T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.2〕 |
+| 最近刷新 | 流水 12.3（2026-11-10） |
+| 下一步 | 完成开工前文档/设计口径修正 → T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.3〕 |
 | 开放决策 | 见 §9 待定表（LiveKit 版本、TLS、流量阈值、机型清单等） |
 | 已验证 | 源码通读（v0.5.1）、服务器只读检查、ADR/交接账本随本次提交入 `fork/main` |
 | 未验证 | 未编译、未上真机、未部署 LiveKit |
@@ -133,7 +133,7 @@ docker compose version # 服务器上需要
 | T2 服务器下发 token | ⬜ 未开始 | `hello` 含 6h 音频 token，权限与房间/昵称匹配 | 待补 |
 | T3 Android 接入 | ⬜ 未开始 | 单机能进语音房并听到远端；拔耳机立即关麦 | 待补 |
 | T4 双机联调 | ⬜ 未开始 | ADR 验收标准逐条通过并记录机型/网络 | 待补 |
-| T5 文档 | ⬜ 未开始 | `docs/02`、`docs/05`、`README` 补齐 v0.6 说明 | 待补 |
+| T5 文档 | ⬜ 未开始 | fork 文档目录补齐语音说明；上游 docs/README 原文不动 | 待补 |
 
 ### T1 LiveKit 独立部署
 
@@ -163,9 +163,9 @@ docker compose version # 服务器上需要
 
 ### T5 文档
 
-- `docs/02-同步协议.md` 加 `voiceToken` 字段
-- `docs/05-Android客户端.md` 加语音章节
-- `README.md` 加 v0.6 说明
+- 在 `docs/branches/android-voice/` 补语音协议、部署、Android 说明
+- `docs/branches/android-voice/02-voice-protocol.md` 记录 `voiceToken` 字段
+- 上游 `README.md`、`docs/01`、`docs/02`、`docs/03`、`docs/05` 原文不动；PR 被接受后再回填
 
 ## 8. 兼容性结论（已核对源码）
 
@@ -213,6 +213,8 @@ docker compose version # 服务器上需要
 | `docs/08-Android客户端现代化UI实施.md` | Android UI 实施边界、阶段与验收矩阵 |
 | `docs/adr/0001-android-voice-chat.md` | 语音方案的全部决策与验收标准 |
 | `AGENTS.md` | 仓库级 agent 规则：红线、权威链、会话交接、代码变更纪律、验证约定 |
+| `CONTEXT.md` | 术语表：上游、fork、语音扩展 |
+| `docs/branches/android-voice/README.md` | fork 语音扩展的范围、文档索引与上游关系 |
 | `.agents/skills/session-handover/SKILL.md` | 会话级交接流程（本项目特化） |
 | `.agents/skills/ledger-rotation/SKILL.md` | 里程碑级账本轮转与保留 |
 | `PROGRESS.md` | 本文件：当前进度与交接 |
@@ -237,3 +239,11 @@ docker compose version # 服务器上需要
 - 内容：语音仅作为 fork 扩展；不改变上游 README 红线、`docs/01` 范围与版本路线图；未配置 LiveKit 时行为与上游一致；ADR 保持 `Proposed`，上游合并前由主项目维护者确认。
 - 证据：`docs/adr/0001-android-voice-chat.md` 标题/状态/适用范围/决策 1；`PROGRESS.md` §0、§1、§3。
 - 决策：T1–T4 在 fork 验证；验证后从 fork 向 `origin/main` 提 PR；当前无上游写权限，合并由主项目维护者执行；PR 只带语音代码与必要文档，不带 `AGENTS.md`、`.agents/`、`PROGRESS.md`。
+
+### 12.3 — 2026-11-10 建立 fork 语音文档目录
+
+- 类型：文档
+- 状态：✅ 已验收（维护者，2026-11-10）
+- 内容：新增 `CONTEXT.md` 术语表与 `docs/branches/android-voice/README.md`；语音文档只写 fork 目录；上游 `README.md`、`docs/01`、`docs/02`、`docs/03`、`docs/05` 原文不动；T5 改为补 fork 文档。
+- 证据：`CONTEXT.md`；`docs/branches/android-voice/README.md`；`PROGRESS.md` §0、§7、§11。
+- 决策：PR 被上游接受前不回填上游文档。
