@@ -14,10 +14,10 @@
 | 最后更新 | 2026-11-10 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（文档头 `32ff2fe`；`fork/main` 已含 ADR 与交接账本；开工前 `git merge main`） |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.7 已验收；T1–T5 未开始〔流水 12.7〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.8 已验收；T1–T5 未开始〔流水 12.8〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.7（2026-11-10） |
-| 下一步 | 确定 LiveKit 镜像 tag → T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.7〕 |
+| 最近刷新 | 流水 12.8（2026-11-10） |
+| 下一步 | 编写 `voice/` Compose 并在服务器跑 T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.8〕 |
 | 开放决策 | 见 §9 待定表（LiveKit 版本、TLS、流量阈值、机型清单等） |
 | 已验证 | 源码通读（v0.5.1）、服务器只读检查、ADR/交接账本随本次提交入 `fork/main` |
 | 未验证 | 未编译、未上真机、未部署 LiveKit |
@@ -137,7 +137,7 @@ docker compose version # 服务器上需要
 
 ### T1 LiveKit 独立部署
 
-- 新增 `voice/docker-compose.yml` + `voice/livekit.yaml`，镜像固定 tag，不写 `latest`
+- 新增 `voice/docker-compose.yml` + `voice/livekit.yaml`，镜像固定 `livekit/livekit-server:v1.13.11`
 - 与 `syncwatch` 同机、独立容器；沿用公网 IP 与安全组
 - 只开 7880/tcp、7881/tcp、7882/udp；3478/udp 默认关闭，直连失败再开
 - `rtc.use_external_ip: true`；安全组尽量限制来源 IP
@@ -185,7 +185,7 @@ docker compose version # 服务器上需要
 |---|---|
 | 现有 Android 切后台会暂停播放，且没有前台服务（见 `docs/05` 已知限制）。语音要后台继续收听，是否同时保持后台播放？ | 建议只保语音、视频照旧暂停，避免扩大改动；真机验证后再定 |
 | 域名与 TLS | 暂不对外；实验期用 `ws://`；对外前必须加 TLS，并重估 TTL/房间复用/token 接口 |
-| LiveKit 镜像固定到哪个版本 | T1 时选一个 release tag 并记录 |
+| LiveKit 镜像版本 | 已定 `v1.13.11`（2026-10-25 release）；升级前跑 T1 回声 + T4 双机回归 |
 | 流量告警阈值 | 按量计费，T1 部署后按实际码率估算 |
 | 需要覆盖的机型/厂商 | T4 前列清单 |
 | 本文件合并前是否删除 | 建议保留到 v0.6 发布 |
@@ -283,3 +283,11 @@ docker compose version # 服务器上需要
 - 内容：LiveKit 与 `syncwatch` 同机、独立容器；只开 7880/tcp、7881/tcp、7882/udp；TURN 3478 默认关闭；配置 `rtc.use_external_ip: true`；安全组尽量限制来源 IP。
 - 证据：`docs/adr/0001-android-voice-chat.md` 决策 5；`docs/branches/android-voice/03-voice-deploy.md`；`PROGRESS.md` T1。
 - 决策：先测直连，NAT 不通再启用 TURN；不开放 50000–60000 整段 UDP。
+
+### 12.8 — 2026-11-10 固定 LiveKit 镜像 v1.13.11
+
+- 类型：部署
+- 状态：✅ 已验收（维护者，2026-11-10）
+- 内容：LiveKit 镜像固定为 `livekit/livekit-server:v1.13.11`（GitHub latest release，2026-10-25）；升级时手动改 tag，并通过 T1 回声测试与 T4 双机回归。
+- 证据：GitHub releases API 查询结果；`docs/branches/android-voice/03-voice-deploy.md`；`PROGRESS.md` T1、§9。
+- 决策：不使用 `latest`。
