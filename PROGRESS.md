@@ -14,10 +14,10 @@
 | 最后更新 | 2026-11-10 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（文档头 `32ff2fe`；`fork/main` 已含 ADR 与交接账本；开工前 `git merge main`） |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.12 已验收；T1–T5 未开始〔流水 12.12〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.13 已验收；T1–T5 未开始〔流水 12.13〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.12（2026-11-10） |
-| 下一步 | 编写 `voice/` Compose 并在服务器跑 T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.12〕 |
+| 最近刷新 | 流水 12.13（2026-11-10） |
+| 下一步 | 编写 `voice/` Compose 并在服务器跑 T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.13〕 |
 | 开放决策 | 见 §9 待定表（LiveKit 版本、TLS、流量阈值、机型清单等） |
 | 已验证 | 源码通读（v0.5.1）、服务器只读检查、ADR/交接账本随本次提交入 `fork/main` |
 | 未验证 | 未编译、未上真机、未部署 LiveKit |
@@ -157,6 +157,7 @@ docker compose version # 服务器上需要
 - Manifest：`RECORD_AUDIO`、`POST_NOTIFICATIONS`、`FOREGROUND_SERVICE_MICROPHONE`（API 34）
 - 不做前台 Service；`onPause` 关麦，`onStop` 本地暂停视频并断开 LiveKit，不发送 `pause`
 - 回前台不自动 seek；保持本机暂停、重连语音，手动 seek 后恢复；期间暂停心跳位置上报，避免 `forceSeek`
+- 回前台「待对齐」状态先禁用直接播放，seek 后再允许
 - 分屏用 `isInMultiWindowMode()` 区分；保持视频与远端音频
 - 耳机输出检测：没有耳机时禁止开麦、但可收听
 - **完成标准**：单机能进语音房、能听到远端；拔耳机立即关麦
@@ -329,3 +330,11 @@ docker compose version # 服务器上需要
 - 内容：回前台不自动 seek；保持本机暂停并重连语音，两人商量后手动 seek，现有 `seek` 同步全房间。手动静止期间暂停心跳位置上报，避免服务端 `forceSeek` 自动跳转。
 - 证据：`docs/adr/0001-android-voice-chat.md` 决策 6、验收标准；`docs/branches/android-voice/05-android-voice.md`；`PROGRESS.md` T3、§9。
 - 决策：不新增协议；手动 seek 后恢复心跳。
+
+### 12.13 — 2026-11-10 回前台待对齐状态禁止直接播放
+
+- 类型：Android / 交互
+- 状态：✅ 已验收（维护者，2026-11-10）
+- 内容：回前台后处于「待对齐」状态时先禁用直接播放；用户 seek 到商定位置后再允许播放，避免把全房间拉回旧进度。
+- 证据：`docs/adr/0001-android-voice-chat.md` 决策 6；`docs/branches/android-voice/05-android-voice.md`；`PROGRESS.md` T3。
+- 决策：T3 用待对齐状态保护播放按钮，不改协议。
