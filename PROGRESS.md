@@ -14,10 +14,10 @@
 | 最后更新 | 2026-11-10 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（文档头 `32ff2fe`；`fork/main` 已含 ADR 与交接账本；开工前 `git merge main`） |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.5 已验收；T1–T5 未开始〔流水 12.5〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.6 已验收；T1–T5 未开始〔流水 12.6〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.5（2026-11-10） |
-| 下一步 | 完成开工前文档/设计口径修正 → T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.5〕 |
+| 最近刷新 | 流水 12.6（2026-11-10） |
+| 下一步 | 完成开工前文档/设计口径修正 → T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.6〕 |
 | 开放决策 | 见 §9 待定表（LiveKit 版本、TLS、流量阈值、机型清单等） |
 | 已验证 | 源码通读（v0.5.1）、服务器只读检查、ADR/交接账本随本次提交入 `fork/main` |
 | 未验证 | 未编译、未上真机、未部署 LiveKit |
@@ -40,7 +40,7 @@
 | 1 | 语音是 **fork 的可选扩展层**，独立容器，不进 `syncwatch` 核心进程 | 隔离故障域；不装 LiveKit 时 fork 行为与上游一致 |
 | 2 | Android 用原生 LiveKit SDK，不用 WebView | 后台音频和麦克风生命周期可控 |
 | 3 | LiveKit room = 6 位房间码；identity = 昵称 + 会话后缀；token 只给音频收发 | 复用现有房间模型，避免重连/同名冲突，权限最小化 |
-| 4 | MVP 由 `hello` 下发 `voiceUrl` + 6 小时 token | 少一个接口；URL 与 token 同生同灭；过期重连再取 |
+| 4 | MVP 由 `hello` 下发 `voiceUrl` + 6 小时 token；仅两人私有使用 | 少一个接口；URL 与 token 同生同灭；6h 覆盖一次观看 |
 | 5 | 只开 7880/tcp、7881/tcp、7882/udp，3478/udp 仅 TURN | 避免整段 UDP 暴露 |
 | 6 | 切后台关麦、继续收听；无耳机不许开麦 | 隐私与回授风险 |
 | 7 | 不做主动 ducking；按量流量设告警，超限停语音 | 不干扰观影；控制账单 |
@@ -182,7 +182,7 @@ docker compose version # 服务器上需要
 | 问题 | 现状 / 建议 |
 |---|---|
 | 现有 Android 切后台会暂停播放，且没有前台服务（见 `docs/05` 已知限制）。语音要后台继续收听，是否同时保持后台播放？ | 建议只保语音、视频照旧暂停，避免扩大改动；真机验证后再定 |
-| 域名与 TLS | 实验期用 `ws://`；对外前必须加，token 接口届时可迁到 `/voice-token` |
+| 域名与 TLS | 暂不对外；实验期用 `ws://`；对外前必须加 TLS，并重估 TTL/房间复用/token 接口 |
 | LiveKit 镜像固定到哪个版本 | T1 时选一个 release tag 并记录 |
 | 流量告警阈值 | 按量计费，T1 部署后按实际码率估算 |
 | 需要覆盖的机型/厂商 | T4 前列清单 |
@@ -264,3 +264,11 @@ docker compose version # 服务器上需要
 - 内容：LiveKit identity 不再直接使用昵称，改为「昵称 + 每次 join 生成的短后缀」；界面仍显示昵称。避免断线重连或昵称释放后与旧 LiveKit 连接冲突。
 - 证据：`docs/adr/0001-android-voice-chat.md` 决策 3；`docs/branches/android-voice/02-voice-protocol.md` token 约束；`PROGRESS.md` §3、T2 完成标准。
 - 决策：后缀只影响 LiveKit 内部身份，不改变用户可见昵称；每次 join 重新生成。
+
+### 12.6 — 2026-11-10 确认仅两人私有使用与 6 小时 token
+
+- 类型：范围 / 安全
+- 状态：✅ 已验收（维护者，2026-11-10）
+- 内容：暂不对外服务，仅两人私有使用；6 小时 token 覆盖一两集电视剧或一部电影；接受泄露后最长 6 小时被冒用的风险。
+- 证据：`docs/adr/0001-android-voice-chat.md` 产品约束、决策 4、风险表；`docs/branches/android-voice/02-voice-protocol.md` 安全边界；`PROGRESS.md` §3、§9。
+- 决策：对外服务前必须加 TLS，并重新评估 TTL、房间码复用与独立 token 接口。
