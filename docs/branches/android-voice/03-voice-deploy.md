@@ -24,7 +24,7 @@
 - 新增 `voice/docker-compose.yml` 与 `voice/livekit.yaml`；镜像固定为 `livekit/livekit-server:v1.13.11`，不使用 `latest`。
 - LiveKit 的 `rtc.tcp_port` 用 7881，`rtc.udp_port` 用 7882，`rtc.use_external_ip: true`。
 - TURN 先关闭；需要时再启用 3478/udp。
-- Docker 网络优先使用 host 模式，避免 WebRTC 端口再经过一层 NAT；若用 bridge，必须显式映射 7880/tcp、7881/tcp、7882/udp。
+- LiveKit 容器使用 `network_mode: host`，避免 WebRTC 端口再经过一层 NAT；`syncwatch` 保持现有部署方式，不使用 bridge 端口映射。
 
 ## 环境变量
 
@@ -41,7 +41,6 @@
 
 ## 未定
 
-- Compose 使用 host 还是 bridge 网络，T1 实测后定。
 - 对外服务前的 TLS 方案；当前仅两人私有使用。
 
 ## 升级策略
