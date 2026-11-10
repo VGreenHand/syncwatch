@@ -11,8 +11,8 @@
 
 ## 文档索引
 
-- `02-voice-protocol.md`（待建）：`voiceToken` 与 `hello` 扩展。
-- `03-voice-deploy.md`（待建）：LiveKit 部署、端口、NAT 与排障。
+- [`02-voice-protocol.md`](02-voice-protocol.md)：`voiceUrl` / `voiceToken` 与 `hello` 扩展。
+- [`03-voice-deploy.md`](03-voice-deploy.md)：LiveKit 同机部署、端口、NAT 与排障。
 - `05-android-voice.md`（待建）：权限、前台服务、耳机检测与音频路由。
 
 ## 与上游的关系
