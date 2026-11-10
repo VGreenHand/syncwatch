@@ -47,11 +47,13 @@ Windows 端暂不加入语音；未来如果要做，可复用同一套 LiveKit 
 - 只有成功加入 SyncWatch 房间的成员才应获得语音 token。
 - 语音 token 的权限限定为：加入指定房间、发布音频、订阅音频；不授予视频、录制或管理员权限。
 
-### 4. MVP 由 `hello` 下发短期 token
+### 4. MVP 由 `hello` 下发连接地址与短期 token
 
-SyncWatch 服务器在成员加入成功时生成 LiveKit JWT，随 `hello` 返回。JWT 包含昵称、房间码、有效期和音频收发权限，使用 LiveKit API Secret 签名。
+SyncWatch 服务器在成员加入成功时，随 `hello` 返回 `voiceUrl` 与 `voiceToken`。`voiceUrl` 来自服务器配置的 `LIVEKIT_URL`，告诉客户端连哪台 LiveKit；`voiceToken` 是使用 LiveKit API Secret 签名的 JWT，包含昵称、房间码、有效期和音频收发权限。
 
 - API Secret 只保存在服务器，绝不写入 APK 或仓库。
+- 只有 `LIVEKIT_URL`、`LIVEKIT_API_KEY`、`LIVEKIT_API_SECRET` 全部配置时才下发两个字段；缺任一项时都不下发，客户端隐藏语音入口。
+- `voiceUrl` 是连接地址，不是秘密；`voiceToken` 是 bearer 凭证，payload 可被解码，不得写入日志或放进 URL。
 - token 有效期设为 6 小时，覆盖一场电影；过期或重连时重新加入 SyncWatch 获取新 token。
 - MVP 阶段使用 `ws://`，token 和房间密码一样可能被链路窃听；在对外提供服务前必须加 TLS，届时再评估迁移到独立的 `/voice-token` 接口。
 
@@ -146,7 +148,7 @@ SyncWatch 服务器在成员加入成功时生成 LiveKit JWT，随 `hello` 返�
 3. 增加 Android 权限：`RECORD_AUDIO`、`POST_NOTIFICATIONS`、前台服务类型；实现耳机检测与后台静音。
 4. 增加 `voice/` Docker Compose、LiveKit 配置、端口说明、流量告警和部署文档。
 5. 用两台真机做双机原型，先验证音频焦点、回声、后台和耳机路由，再定 UI。
-6. 补 `docs/02-同步协议.md` 的 `voiceToken` 字段、`docs/05-Android客户端.md` 的语音章节和 `README.md` 的 v0.6 说明。
+6. 补 `docs/branches/android-voice/` 的协议补充、部署与 Android 说明；上游 `docs/02`、`docs/05`、`README.md` 原文不动，PR 被接受后再回填。
 
 ## 待定问题
 
