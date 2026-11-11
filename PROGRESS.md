@@ -14,13 +14,13 @@
 | 最后更新 | 2026-11-11 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；与 `fork/feat/android-voice` 同步，T1 提交 `37a6234` 已 push） |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2–T5 未开始〔流水 12.22〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2 已验收（本地 + 隔离服务器副本证据）；T3–T5 未开始〔流水 12.23〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.22（2026-11-11） |
-| 下一步 | 开 T2 服务端下发 token（`hello` 增加 `voiceUrl` / `voiceToken`）；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.22〕 |
+| 最近刷新 | 流水 12.23（2026-11-11） |
+| 下一步 | T2 已由维护者验收；下一步先做 T3.0 最小客户端验卡（用 T2 token 连接 LiveKit），再做 T3 Android 接入；生产部署与上游 PR 待维护者决定〔流水 12.23〕 |
 | 开放决策 | 见 §9 待定表（TLS、SDK 版本、流量阈值、机型清单等；LiveKit 服务端版本与网络已定） |
-| 已验证 | 源码通读（v0.5.1）、开工前设计口径与开发计划已入库、T1–T4 验收口径已具体化、`voice/` 配置与自包含 `deploy.sh` 已就绪；服务器已部署 `syncwatch-livekit`，镜像 `v1.13.11`，三端口监听，本机与公网 HTTP 200，`node_ip` 生效；T1 音频验收通过；停 LiveKit 后 `syncwatch` 仍 healthy、8995 仍监听，恢复后自检全 PASS；维护者决定暂不设置临时告警并验收通过 T1；T1 收尾与账本提交已 push 至 `fork/feat/android-voice` |
-| 未验证 | UDP 7882 与 TCP 7881 的实际选中路径未单独确认；停服窗口内未用客户端实测播放同步；未在 Android 客户端真机验证（T3/T4 补） |
+| 已验证 | 源码通读（v0.5.1）、开工前设计口径与开发计划已入库、T1–T4 验收口径已具体化、`voice/` 配置与自包含 `deploy.sh` 已就绪；服务器已部署 `syncwatch-livekit`，镜像 `v1.13.11`，三端口监听，本机与公网 HTTP 200，`node_ip` 生效；T1 音频验收通过；停 LiveKit 后 `syncwatch` 仍 healthy、8995 仍监听，恢复后自检全 PASS；维护者决定暂不设置临时告警并验收通过 T1；T1 收尾与账本提交已 push 至 `fork/feat/android-voice`；T2 服务端、`tools/sim`、`tools/ctl` 构建通过，本地 `hello` 的 token 签名/TTL/权限矩阵、缺配置关闭路径、并发入房与 `sync` 广播均通过；T2 隔离服务器副本使用真实 `LIVEKIT_*`，容器健康、token `sig=ok`、TTL `6h0m0s`、权限矩阵与 A/B `sync` 广播通过，生产 `syncwatch` 未受影响的 8995 保持 healthy〔流水 12.23〕 |
+| 未验证 | UDP 7882 与 TCP 7881 的实际选中路径未单独确认；停服窗口内未用客户端实测播放同步；未在 Android 客户端真机验证（T3/T4 补）；生产部署尚未更新（T2 验收不依赖生产部署）；Windows 控制台/GUI/Android 旧客户端未实际入房（仅源码与 `tools/ctl` 兼容验证）；签发失败路径未强制触发；token 被 LiveKit 实际接受仍留给 T3/T4〔流水 12.23〕 |
 | 导航 | 本表 → ADR → `docs/02` → §7 当前任务行；历史见 §12 |
 
 ## 1. 目标
@@ -135,7 +135,7 @@ docker compose version # 服务器上需要
 | 任务 | 状态 | 完成标准（摘要） | 证据 |
 |---|---|---|---|
 | T1 LiveKit 独立部署 | ✅ 已验收 | 发布端发送已知音频，另一公网客户端听到；端口、告警与停服演练符合预期 | 部署/公网 TCP/440 Hz 音频/停服隔离均通过；告警按维护者决定豁免〔流水 12.18–12.22〕 |
-| T2 服务器下发 token | ⬜ 未开始 | `hello` 含 `voiceUrl` 与 6h token；权限限定麦克风发布与音频订阅；异常时不泄露凭证 | 待补 |
+| T2 服务器下发 token | ✅ 已验收 | `hello` 含 `voiceUrl` 与 6h token；权限限定麦克风发布与音频订阅；异常时不泄露凭证 | 本地 `tools/sim`：`sig=ok`、TTL `6h0m0s`、权限矩阵通过；缺配置/错误 URL 为 `voice=off`；`tools/ctl` 入房与并发 `sync` 通过；隔离服务器副本使用真实 `LIVEKIT_*` 通过，生产未动；维护者 2026-11-11 确认验收；旧客户端真机与签发失败路径待 T3/T4〔流水 12.23〕 |
 | T3 Android 接入 | ⬜ 未开始 | 单机能进房听到远端；后台本地暂停不广播；回前台待对齐，手动 seek 后恢复；分屏只关麦；无语音配置时行为不变 | 待补 |
 | T4 双机联调 | ⬜ 未开始 | 按固定采样、丢包、切换与 30 分钟口径通过，并记录机型、系统、网络与原始数据 | 待补 |
 | T5 文档 | ⬜ 未开始 | fork 文档目录补齐语音说明；上游 docs/README 原文不动 | 待补 |
@@ -441,3 +441,12 @@ docker compose version # 服务器上需要
 - 证据：流水 12.18–12.21；`PROGRESS.md` §9 告警豁免条目；未记录公网 IP、密钥或 token。提交 `37a6234`（`feat(v0.6): T1 LiveKit 部署与音频验收`），已推送 `fork/feat/android-voice`（`32ff2fe..37a6234`）。
 - 遗留：UDP 7882 与 TCP 7881 的实际选中路径未单独确认；停服窗口内未用客户端实测播放同步（留 T4）；手机型号/系统/浏览器待补。
 - 决策：维护者验收通过 T1，告警豁免维持；下一任务 T2 服务端下发 token。阶段检查点 commit + push 到 `fork/feat/android-voice`，维护者已授权。
+
+### 12.23 — 2026-11-11 T2 服务端下发 token 本地实现完成
+
+- 类型：实现
+- 状态：✅ 已验收
+- 内容：`server/main.go` 在成员成功加入后签发 6 小时 LiveKit HS256 JWT，随 `hello` 下发 `voiceUrl` / `voiceToken`；三项 `LIVEKIT_*` 完整且 URL 为 `ws://` 或 `wss://` 才启用，缺任一项或 URL 非法时两个字段都不下发，普通入房不受影响。token 权限固定为指定房间、麦克风发布与订阅，`canPublishData`、管理员、建房、录制均为 false。`server/docker-compose.yml` 接入三项环境变量，`server/.env.example` 与 fork 文档补充注入和验收口径；`tools/sim` 增加 claims 解码、长度输出与本地 HS256 校验，不输出 token 本体。
+- 证据：临时 Go 1.22.12 工具链下 `go build` 服务端、`tools/sim`、`tools/ctl` 通过，`gofmt` 与 `git diff --check` 通过。本地完整配置启动日志 `[voice] token issuance enabled`；`hello` 输出 `voiceUrl=ws://127.0.0.1:7880 tokenLen=476 sig=ok alg=HS256 sub=Alice#99cc name=Alice room=TEST01 ttl=6h0m0s join=true publish=true sources=[microphone] subscribe=true data=false admin=false create=false record=false recorder=false`。逐项缺少 `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` 及非法 URL 时均为 `voice=off` 且入房正常；`tools/ctl` 作为不解析语音字段的客户端成功入房并发送 `play`；同一昵称两次 join 得到不同后缀 `Alice#6731` / `Alice#545e`。并发复测：Alice 15:36:14 入房、Bob 15:36:15 加入后 `members=2`，A 收到 `play` / `pause` / `seek` 的 `sync` 广播；`hello` 继承既有房间 `pos=200.0 created=false`，token 为 `Alice#e2ee`、`sig=ok`、`ttl=6h0m0s`。2026-11-11 17:00–17:01 在服务器创建隔离副本，镜像 `syncwatch:t2-test`、容器 `syncwatch-t2-test`、仅绑定 `127.0.0.1:18995`；日志 `[voice] token issuance enabled`，容器环境变量名计数 3，健康检查 200。经临时 SSH 隧道跑 A/B：`voiceUrl` 存在，`tokenLen=509`、`sig=ok`、`alg=HS256`、`room=T2TEST`、`ttl=6h0m0s`，权限矩阵全通过；Bob 的 `play` / `pause` / `seek` 均广播给 Alice。测试期间生产 `syncwatch` 保持 healthy、8995 仍监听、健康接口 200；测试容器、镜像和目录已清理。
+- 遗留：T2 尚未更新生产部署；Windows 控制台/GUI/Android 旧客户端未实际入房（仅源码与 `tools/ctl` 兼容验证）；签发失败路径未强制触发；token 被 LiveKit 实际接受留给 T3/T4。
+- 决策：维护者 2026-11-11 确认 T2 验收通过，状态翻为 ✅，并批准提交/推送；T2 不依赖生产部署。下一步先做 T3.0 最小客户端验卡，再进入 T3 Android 接入；生产部署仍待维护者决定。

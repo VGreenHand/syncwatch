@@ -21,7 +21,7 @@
 ## token 约束
 
 - room = SyncWatch 的 6 位房间码。
-- identity = 昵称 + 每次 `join` 生成的短后缀（如 `小明#a3f9`）；界面仍显示昵称。
+- identity = 昵称 + 每次 `join` 生成的 4 位十六进制后缀（如 `小明#a3f9`）；`name` claim 保留原始昵称，界面仍显示昵称。
 - 有效期 6 小时；过期或重连时重新 `join` 获取新 token。
 - 权限只含加入指定房间、发布麦克风音频、订阅房间已发布轨道；不授予视频、录制或管理员权限。
 
@@ -36,6 +36,21 @@
 | `roomAdmin` / `roomCreate` / `roomRecord` / `recorder` | `false` |
 
 `canSubscribe` 订阅的是房间内所有已发布轨道；第一版只发布麦克风，因此等价于音频订阅。未来若允许视频，需要重新评估这个权限。
+
+## JWT 结构（T2 实现）
+
+- 算法 `HS256`，签名密钥为 `LIVEKIT_API_SECRET`；header 为 `{"alg":"HS256","typ":"JWT"}`。
+- JWT 只在成员成功加入 SyncWatch 房间后签发，room 取服务器回填的房间码，identity 每次 `join` 重新生成。
+
+| claim | 值 |
+|---|---|
+| `iss` | `LIVEKIT_API_KEY`（不写日志） |
+| `sub` | `昵称#4位十六进制` |
+| `name` | 原始昵称 |
+| `nbf` / `exp` | 签发时刻 / 签发时刻 + 6h，Unix 秒 |
+| `video` | 上表权限矩阵；未列出的字段为 `false` |
+
+服务端不打印完整 token；排障只记录 token 长度和非敏感 claims。`tools/sim` 可在本地解码并校验签名，不输出 token 本体。
 
 ## 异常路径
 

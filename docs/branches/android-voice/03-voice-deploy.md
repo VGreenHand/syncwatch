@@ -30,7 +30,27 @@
 
 - `LIVEKIT_URL`：客户端连接地址，例如 `ws://<公网IP>:7880`。
 - `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`：只放服务器 `.env` 或部署环境，不入库、不写日志。
-- `syncwatch` 服务端读取同一组变量，T2 时用于签发 token。
+- `syncwatch` 服务端读取同一组变量用于签发 token；`server/docker-compose.yml` 已把三项传入容器。
+
+### 注入 syncwatch
+
+`voice/.env` 是 LiveKit 容器的配置源；`syncwatch` 容器不直接读取该文件，需要把同三项写入 `server/.env`（`deploy.sh` 会一并上传）。缺任一项即关闭语音，不影响普通播放同步。
+
+> 注意：`server/deploy.sh` 会把本地 `server/.env` 一并上传并覆盖远端。若本地没有 `server/.env`，它会先复制 `.env.example`，导致远端原有的 `LIVEKIT_*` 丢失、语音被关闭。首次启用时优先在服务器部署目录直接修改 `.env`；确要用 `deploy.sh`，先确认本地 `server/.env` 已包含三项且不打印其内容。
+
+```bash
+# 在仓库根目录执行；只写入 server/.env，不打印密钥
+set -a; . voice/.env; set +a
+cd server
+sed -i '/^LIVEKIT_/d' .env
+printf 'LIVEKIT_URL=%s\nLIVEKIT_API_KEY=%s\nLIVEKIT_API_SECRET=%s\n' \
+  "$LIVEKIT_URL" "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" >> .env
+chmod 600 .env
+unset LIVEKIT_API_KEY LIVEKIT_API_SECRET
+docker compose up -d
+```
+
+验证：`docker compose exec syncwatch env | grep -c '^LIVEKIT_'` 应输出 `3`（只数变量名，不打印值）；服务端日志出现 `[voice] token issuance enabled`。
 
 ## 验证
 
@@ -39,6 +59,7 @@
 3. 从公网检查 7880/tcp、7881/tcp、7882/udp 可达，3478/udp 未开放。
 4. 停止 LiveKit，确认 `syncwatch` 的加入房间与播放同步仍正常。
 5. 失败时保留 `docker compose logs` 摘要；不要把完整 token 或密钥写进记录。
+6. T2 用 `tools/sim` 入房，确认 `hello` 含 `voiceUrl` / `voiceToken`，且 token 的 room、identity、6 小时有效期与权限矩阵符合 `02-voice-protocol.md`；只记录非敏感 claims 与长度。
 
 ## 流量告警与停服
 
