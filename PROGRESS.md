@@ -13,7 +13,7 @@
 |---|---|
 | 最后更新 | 2026-11-11 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
-| 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；本地领先 `fork/feat/android-voice`，未 push） |
+| 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；与 `fork/feat/android-voice` 同步，T1 提交 `37a6234` 已 push） |
 | 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2–T5 未开始〔流水 12.22〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
 | 最近刷新 | 流水 12.22（2026-11-11） |
@@ -438,6 +438,6 @@ docker compose version # 服务器上需要
 - 类型：收尾
 - 状态：✅ 已验收（维护者 2026-11-11）
 - 内容：T1 部署、公网 TCP、440 Hz 音频验收、停服隔离与恢复自检均通过；维护者明确决定暂不设置临时流量/费用告警，按已接受风险记录，不阻塞 T1 收尾。T1 置 🔶 待验收。
-- 证据：流水 12.18–12.21；`PROGRESS.md` §9 告警豁免条目；未记录公网 IP、密钥或 token。
-- 遗留：UDP 7882 与 TCP 7881 的实际选中路径未单独确认；停服窗口内未用客户端实测播放同步（留 T4）；手机型号/系统/浏览器待补；工作区修改未提交、未 push。
+- 证据：流水 12.18–12.21；`PROGRESS.md` §9 告警豁免条目；未记录公网 IP、密钥或 token。提交 `37a6234`（`feat(v0.6): T1 LiveKit 部署与音频验收`），已推送 `fork/feat/android-voice`（`32ff2fe..37a6234`）。
+- 遗留：UDP 7882 与 TCP 7881 的实际选中路径未单独确认；停服窗口内未用客户端实测播放同步（留 T4）；手机型号/系统/浏览器待补。
 - 决策：维护者验收通过 T1，告警豁免维持；下一任务 T2 服务端下发 token。阶段检查点 commit + push 到 `fork/feat/android-voice`，维护者已授权。
