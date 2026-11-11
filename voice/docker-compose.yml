@@ -1,0 +1,12 @@
+services:
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    container_name: syncwatch-livekit
+    restart: unless-stopped
+    network_mode: host
+    command: --config /etc/livekit.yaml
+    environment:
+      # Docker Compose 读取同目录 .env 做变量替换；不要把 .env 提交到仓库。
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?LIVEKIT_API_KEY missing in voice/.env}: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET missing in voice/.env}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro

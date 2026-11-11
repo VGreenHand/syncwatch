@@ -11,16 +11,16 @@
 
 | 项 | 值 |
 |---|---|
-| 最后更新 | 2026-11-10 |
+| 最后更新 | 2026-11-11 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；本地领先 `fork/feat/android-voice`，未 push） |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`；12.1–12.14 已验收；开工前设计口径完成；T1–T5 未开始〔流水 12.14〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2–T5 未开始〔流水 12.22〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.14（2026-11-10） |
-| 下一步 | 编写 `voice/` Compose 并在服务器跑 T1；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.14〕 |
-| 开放决策 | 见 §9 待定表（TLS、流量阈值、机型清单等；LiveKit 版本与网络已定） |
-| 已验证 | 源码通读（v0.5.1）、服务器只读检查、开工前设计口径与开发计划已入库 |
-| 未验证 | 未编译、未上真机、未部署 LiveKit、未 push |
+| 最近刷新 | 流水 12.22（2026-11-11） |
+| 下一步 | 开 T2 服务端下发 token（`hello` 增加 `voiceUrl` / `voiceToken`）；上游 PR 待 T1–T4 验证后由主项目维护者确认〔流水 12.22〕 |
+| 开放决策 | 见 §9 待定表（TLS、SDK 版本、流量阈值、机型清单等；LiveKit 服务端版本与网络已定） |
+| 已验证 | 源码通读（v0.5.1）、开工前设计口径与开发计划已入库、T1–T4 验收口径已具体化、`voice/` 配置与自包含 `deploy.sh` 已就绪；服务器已部署 `syncwatch-livekit`，镜像 `v1.13.11`，三端口监听，本机与公网 HTTP 200，`node_ip` 生效；T1 音频验收通过；停 LiveKit 后 `syncwatch` 仍 healthy、8995 仍监听，恢复后自检全 PASS；维护者决定暂不设置临时告警并验收通过 T1 |
+| 未验证 | UDP 7882 与 TCP 7881 的实际选中路径未单独确认；停服窗口内未用客户端实测播放同步；未上真机、未 push |
 | 导航 | 本表 → ADR → `docs/02` → §7 当前任务行；历史见 §12 |
 
 ## 1. 目标
@@ -47,6 +47,8 @@
 
 **需要主项目维护者单独点头的一条**：fork 启用语音后，从「单二进制、纯信令、零媒体流量」变成「核心信令 + 可选媒体面」；上游项目定位不变，合并 PR 时单独说明。
 
+ADR 的 `Proposed` 只表示上游合并决策尚未批准；fork 内实施按维护者既有授权先行，12.15 是计划修订（待验收），不等于上游接受该决策。
+
 ## 4. 进度（静态背景）
 
 截至 2026-11-06：ADR 0001 草案（状态 Proposed）与本交接文档已完成；功能代码未开始。此后进度只写 §0 入口与 §12 流水，本节不再更新。
@@ -64,7 +66,7 @@
 
 ## 5. 环境事实
 
-服务器（只读检查过，未做任何变更）：
+服务器（2026-11-11 起新增 LiveKit 伴生容器）：
 
 - 阿里云轻量应用服务器，西南1（成都），Alibaba Cloud Linux 3.21.04
 - 2 vCPU / 2 GiB / 40 GiB 系统盘；峰值带宽 200 Mbps；**无固定流量包，按量计费**
@@ -72,6 +74,9 @@
 - 空闲负载 0.07/0.05/0.00，资源足够跑 LiveKit
 - 公网 IP **不写进仓库**；本机记录在 `private/`（已 gitignore）或 SSH config 别名
 - 已确认可以添加 UDP 防火墙规则；`rpcbind` 仍在 111 端口监听所有网卡（未处理，低优先级）
+- Docker Hub 直连超时；`livekit/livekit-server:v1.13.11` 经 `docker.m.daocloud.io` 拉取后重打原标签
+- LiveKit 容器 `syncwatch-livekit` 使用 host 网络；镜像 digest `sha256:0e20c255a2c17000c52d0631b79737a4216c06bc51df13878768df01261c8dfd`，服务端版本 `1.13.11`
+- LiveKit 日志提示 UDP 接收缓冲 425984，低于建议值 5000000；属 WARN，T4 前评估 `net.core.rmem_max`
 
 端口计划：
 
@@ -129,10 +134,10 @@ docker compose version # 服务器上需要
 
 | 任务 | 状态 | 完成标准（摘要） | 证据 |
 |---|---|---|---|
-| T1 LiveKit 独立部署 | ⬜ 未开始 | `docker compose up -d` 后能进房并听到回声测试音 | 待补 |
-| T2 服务器下发 token | ⬜ 未开始 | `hello` 含 `voiceUrl` 与 6h 音频 token，权限与房间/昵称匹配 | 待补 |
-| T3 Android 接入 | ⬜ 未开始 | 单机能进语音房并听到远端；切后台只暂停本机，回前台手动 seek 后恢复，分屏只关麦 | 待补 |
-| T4 双机联调 | ⬜ 未开始 | ADR 验收标准逐条通过并记录机型/网络 | 待补 |
+| T1 LiveKit 独立部署 | ✅ 已验收 | 发布端发送已知音频，另一公网客户端听到；端口、告警与停服演练符合预期 | 部署/公网 TCP/440 Hz 音频/停服隔离均通过；告警按维护者决定豁免〔流水 12.18–12.22〕 |
+| T2 服务器下发 token | ⬜ 未开始 | `hello` 含 `voiceUrl` 与 6h token；权限限定麦克风发布与音频订阅；异常时不泄露凭证 | 待补 |
+| T3 Android 接入 | ⬜ 未开始 | 单机能进房听到远端；后台本地暂停不广播；回前台待对齐，手动 seek 后恢复；分屏只关麦；无语音配置时行为不变 | 待补 |
+| T4 双机联调 | ⬜ 未开始 | 按固定采样、丢包、切换与 30 分钟口径通过，并记录机型、系统、网络与原始数据 | 待补 |
 | T5 文档 | ⬜ 未开始 | fork 文档目录补齐语音说明；上游 docs/README 原文不动 | 待补 |
 
 ### T1 LiveKit 独立部署
@@ -141,37 +146,51 @@ docker compose version # 服务器上需要
 - 与 `syncwatch` 同机、独立容器；沿用公网 IP 与安全组
 - LiveKit 容器使用 `network_mode: host`；`syncwatch` 保持现有部署方式
 - 只开 7880/tcp、7881/tcp、7882/udp；3478/udp 默认关闭，直连失败再开
-- `rtc.use_external_ip: true`；安全组尽量限制来源 IP
-- **完成标准**：服务器上 `docker compose up -d` 后，用 LiveKit 官方 CLI/示例签发一个临时 token，能进房并听到自己的回声测试音
+- 服务器上由 `deploy.sh` 探测公网 IPv4 写入 `rtc.node_ip`（不依赖 Google STUN）；仓库模板保留 `rtc.use_external_ip: true` 作为回退；安全组尽量限制来源 IP
+- 先记录 LiveKit CLI 版本；`--publish-demo` 是视频演示，不能代替音频验收
+- **音频验收**：发布端用 `lk room join --identity publisher --publish <已知音频.ogg> <房间>`（或官方示例发布麦克风），订阅端用另一台公网客户端加入同一房间并确认听到；记录发布端、订阅端、命令、房间名、时间与结果。若 CLI 不能本地播放，使用两个官方示例客户端，一个发布、一个订阅
+- **成本保护**：在阿里云设置临时月度流量/费用告警（建议先取 100 GB/月或月度预算 50%，取较低者），并演练停服：`docker compose -f voice/docker-compose.yml stop` 后确认 `syncwatch` 仍能加入房间和同步播放
+- **完成标准**：上述音频验收成功，端口检查符合预期，停服演练不影响 `syncwatch`；失败时保留 `docker compose logs` 摘要
 - 注意：这一步不改 syncwatch 任何代码
 
 ### T2 服务器下发 token
 
 - `server/main.go` 的 `Msg` 结构体（第 38 行起）增加 `VoiceUrl` 与 `VoiceToken` 字段，JSON tag 用 `json:"voiceUrl,omitempty"` / `json:"voiceToken,omitempty"`
 - 仅在配置了 `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` 时生成；缺失时两个字段都不下发，客户端隐藏语音入口
+- `LIVEKIT_*` 由 T1 生成的 `voice/.env` 注入 `syncwatch` 运行环境；密钥不复制进仓库、不打印
 - 在 `hello` 消息（第 446 行）里带上；`voiceUrl` 原样取 `LIVEKIT_URL`
-- **完成标准**：模拟 join 时 `hello` 含 `voiceUrl` 与 token；解码后 room = 房间码、identity = 昵称 + 会话后缀、有效期 6h、只含音频收发权限
+- **权限矩阵**：`roomJoin=true`、`room=<房间码>`、`canPublish=true`、`canPublishSources=[microphone]`、`canSubscribe=true`、`canPublishData=false`；`roomAdmin`、`roomCreate`、`roomRecord`、`recorder` 均为 false
+- **异常路径**：配置不完整或签发失败时不阻断普通 `join`，不下发两个字段，日志不打印 API Secret、完整 token 或可复用凭证
+- **验证矩阵**：配置齐全 → 两个字段出现；缺任一变量 → 不出现；配置不可解析或签发失败 → 不出现且普通入房正常；旧 Android、Windows 控制台、GUI 能忽略新字段并正常入房
+- **完成标准**：用 `tools/sim` / `tools/ctl` 模拟 join，`hello` 含 `voiceUrl` 与 token；只打印 token 的非敏感 claims 和长度，确认 room = 房间码、identity = 昵称 + 会话后缀、有效期 6h、权限符合上述矩阵
 
 ### T3 Android 接入
 
-- Manifest：`RECORD_AUDIO`、`POST_NOTIFICATIONS`、`FOREGROUND_SERVICE_MICROPHONE`（API 34）
-- 不做前台 Service；`onPause` 关麦，`onStop` 本地暂停视频并断开 LiveKit，不发送 `pause`
-- 回前台不自动 seek；保持本机暂停、重连语音，手动 seek 后恢复；期间暂停心跳位置上报，避免 `forceSeek`
-- 回前台「待对齐」状态先禁用直接播放，seek 后再允许
-- 分屏用 `isInMultiWindowMode()` 区分；保持视频与远端音频
-- 耳机输出检测：没有耳机时禁止开麦、但可收听
-- **完成标准**：单机能进语音房、能听到远端；拔耳机立即关麦
+- **T3.0 依赖与构建**：先固定 LiveKit Android SDK 版本，只加依赖与最小连接/发布/订阅代码，验证 minSdk 24 / SDK 34 / Gradle 8.7 / JDK 17 可构建，再改播放 UI 和生命周期
+- Manifest：只加 `RECORD_AUDIO`；若 SDK 明确要求再加 `MODIFY_AUDIO_SETTINGS`。第一版不做前台 Service，因此不加 `POST_NOTIFICATIONS` / `FOREGROUND_SERVICE_MICROPHONE`；后台语音再评估
+- **语音模式判定**：`hello` 同时含 `voiceUrl` 与 `voiceToken` 才启用语音状态机；否则保持上游现有生命周期与同步行为
+- **状态机**：`NORMAL` 正常同步；`BACKGROUND_LOCAL_PAUSE` 切后台本地暂停；`FOREGROUND_PENDING_ALIGN` 回前台待对齐
+- `NORMAL → BACKGROUND_LOCAL_PAUSE`：`onStop` 本地暂停视频并断开 LiveKit，保留 SyncWatch 信令连接；不发送 `pause`；显式抑制 `onLocalPause` 广播；可发一次 `memberState=paused`，随后停发心跳位置
+- `BACKGROUND_LOCAL_PAUSE → FOREGROUND_PENDING_ALIGN`：`onStart` / `onResume` 保持本机暂停并重连语音；禁用直接播放；收到 `sync` 只更新房间目标与成员状态，不自动 seek/play；不发送心跳位置
+- `FOREGROUND_PENDING_ALIGN → NORMAL`：用户手动 seek 后发送现有 `seek`，恢复心跳位置与播放按钮；不自动追赶
+- 分屏/焦点：API 29+ 用 `onTopResumedActivityChanged` 判断顶层 resumed；API 24–28 用 `onPause` / `onResume` 兜底；`isInMultiWindowMode()` 只用于区分分屏。失去焦点只关麦，保持视频与远端音频
+- 耳机输出：用 `AudioManager` 输出设备与 `AudioDeviceCallback` 判断有线/蓝牙/USB 耳机；拔耳机立即关麦；扬声器/听筒不算耳机。无耳机、权限被拒或麦克风被占用时只禁用发言并提示原因，仍可收听
+- **完成标准**：单机能进语音房、能听到远端；切后台不暂停对方；回前台保持暂停直到手动 seek；分屏只关麦；无语音配置时行为与上游一致；拔耳机立即关麦
 
 ### T4 双机联调
 
-- 按 ADR「验收标准」逐条测：延迟 p50 ≤ 300 ms / p95 ≤ 600 ms、5% 丢包可懂、Wi-Fi→4G 重连、30 分钟不中断、播放同步不漂移
-- **完成标准**：结果写回本文件或 PR，注明机型、系统版本、网络
+- **延迟**：至少 3 轮 × 5 分钟，每方向不少于 30 个样本；用 LiveKit 连接统计 RTT 加主观回声延迟记录 p50 / p95；若无法取得客观值，写明估算方法与限制
+- **丢包**：在中间热点/路由施加 5% 丢包 5 分钟（记录工具与版本，如 Linux `tc netem` 或 Windows `clumsy`），判断语音可懂度
+- **切换**：Wi-Fi → 4G 切换后 15 秒内语音恢复，播放同步不中断；记录断开/重连次数
+- **30 分钟**：记录断开、重连、`forceSeek` 次数；播放位置偏差不超过 1.0 秒（现有同步阈值），超过即失败
+- **成本**：按实测码率调整 T1 的临时告警阈值；再次演练只停语音、不停 `syncwatch`
+- **完成标准**：结果写回本文件或 PR，注明机型、Android 版本、网络、日期、APK 版本、测量工具与原始样本
 
 ### T5 文档
 
 - 在 `docs/branches/android-voice/` 补语音协议、部署、Android 说明
-- `docs/branches/android-voice/02-voice-protocol.md` 记录 `voiceUrl` 与 `voiceToken` 字段
-- 上游 `README.md`、`docs/01`、`docs/02`、`docs/03`、`docs/05` 原文不动；PR 被接受后再回填
+- `docs/branches/android-voice/02-voice-protocol.md` 记录 `voiceUrl` 与 `voiceToken` 字段、权限矩阵与异常路径
+- 把 T1–T4 的实际命令、结果与限制写回 fork 文档；上游 `README.md`、`docs/01`、`docs/02`、`docs/03`、`docs/05` 原文不动，PR 被接受后再回填
 
 ## 8. 兼容性结论（已核对源码）
 
@@ -187,21 +206,28 @@ docker compose version # 服务器上需要
 
 | 问题 | 现状 / 建议 |
 |---|---|
-| Android 切后台/分屏时视频与语音怎么处理？ | 已定：切后台只暂停本机并断开语音，不广播 pause；回前台保持暂停、重连语音，手动 seek 后恢复；分屏失去焦点只关麦 |
+| Android 切后台/分屏时视频与语音怎么处理？ | 已定：切后台只暂停本机并断开语音，不广播 pause；回前台保持暂停、重连语音，手动 seek 后恢复；分屏失去焦点只关麦。补充：语音未配置时保持上游行为；待对齐期间忽略 `sync` 的自动 seek/play |
 | Windows 语音何时做？ | v0.6 不做；后续 GUI 版优先评估 WebView2 + LiveKit JS SDK |
 | 域名与 TLS | 暂不对外；实验期用 `ws://`；对外前必须加 TLS，并重估 TTL/房间复用/token 接口 |
-| LiveKit 镜像版本 | 已定 `v1.13.11`（2026-10-25 release）；升级前跑 T1 回声 + T4 双机回归 |
+| LiveKit 镜像版本 | 已定 `v1.13.11`（2026-10-25 release）；升级前跑 T1 音频验收 + T4 双机回归 |
 | LiveKit 容器网络 | 使用 host；`syncwatch` 保持现有部署，不使用 bridge 端口映射 |
-| 流量告警阈值 | 按量计费，T1 部署后按实际码率估算 |
+| 流量告警阈值 | T1 先设 100 GB/月或月度预算 50%（取较低者）；T4 按实测码率调整 |
 | 需要覆盖的机型/厂商 | T4 前列清单 |
 | 本文件合并前是否删除 | 建议保留到 v0.6 发布 |
 | 仓库级 `AGENTS.md` | 已建立（2026-11-10）；项目红线、文档权威链与会话交接条款见根目录 |
+| LiveKit Android SDK 版本 | T3.0 固定版本并先验证 minSdk 24 / SDK 34 / Gradle 8.7 / JDK 17 |
+| 分屏焦点检测 | API 29+ 用 `onTopResumedActivityChanged`；API 24–28 用 `onPause` / `onResume` 兜底 |
+| ADR `Proposed` 的含义 | 仅表示上游合并决策未批准；fork 内实施按既有授权先行，不等于上游接受 |
+| T1 服务器访问 | 本机公钥被 `deploy` / `root` / `ecs-user` / `ubuntu` 拒绝；服务器 agent 在 bwrap 内只映射单 gid，无法访问 docker socket。改为维护者在宿主执行 `su - dsh` 一条命令，agent 只负责写文件与分析日志 |
+| UDP 接收缓冲 | 当前 `net.core.rmem_max` 下 LiveKit 报 425984，低于建议 5000000；T1 不阻塞，T4 丢包/延迟测试前评估是否持久化调整 |
+| 临时流量/费用告警 | 维护者 2026-11-11 决定暂不设置。风险：按量计费无硬闸，异常流量只能靠账单/监控发现后手动停 `syncwatch-livekit`；T4 实测码率后再评估 |
 
 ## 10. 多机协作规则
 
 - 一条分支同一时间只在一台机器上活跃；换机前 commit + push，并更新 §0「当前占用」
 - 开工前 `git fetch && git pull --ff-only`（共享分支不改写历史；落后 `main` 时用 `git merge main`）
 - 不对共享分支 `push --force`；分支名按任务起，不按机器起
+- 阶段验收后 push 一次到 `fork/feat/android-voice`（T1 配置、T2 协议、T3/T4 客户端）；日常小步只在本地 commit，`.env` 与真实 IP 永不入库
 - 密钥只放服务器 `.env` 或本机 `private/`；仓库里只放 `.example`
 - 两台机器统一 JDK 17 / SDK 34 / Gradle 8.7，否则会出现「我这儿能编译」
 - 提交风格跟仓库现有习惯：`feat(v0.6): 中文描述`、`docs: 中文描述`
@@ -346,3 +372,72 @@ docker compose version # 服务器上需要
 - 内容：开工前设计与文档口径已收尾；开发计划保存于 ADR、`docs/branches/android-voice/` 的 README/02/03/05 与 §7 任务表；T1–T5 未开始。
 - 证据：`git ls-files` 确认 ADR、`CONTEXT.md`、`docs/branches/android-voice/` 四份文档、`AGENTS.md`、`PROGRESS.md` 均已入库；工作区干净；本地领先 `fork/feat/android-voice`，未 push。
 - 决策：下一步 T1；未编译、未上真机、未部署 LiveKit。
+
+### 12.15 — 2026-11-10 按评审补齐语音计划执行口径
+
+- 类型：计划 / 文档
+- 状态：✅ 已验收（维护者指示按此计划开始 T1，2026-11-10）
+- 内容：T1 改为可执行的音频发布/订阅验收，并加入临时流量告警与停服演练；T2 明确 token 权限矩阵、异常路径与旧客户端兼容验证；T3 增加语音启用判定、`NORMAL` / `BACKGROUND_LOCAL_PAUSE` / `FOREGROUND_PENDING_ALIGN` 状态机、分屏多 resume 检测、耳机路由、SDK 兼容性先行与 Manifest 权限核减；T4 固定延迟、丢包、切换、30 分钟与告警的测量口径；ADR 与会话交接 skill 区分上游 `Proposed` 与 fork 实施授权。
+- 证据：本文件 §0/§3/§7/§9；`docs/adr/0001-android-voice-chat.md` 状态与 §4/§6/§7/验收；`docs/branches/android-voice/02-voice-protocol.md`、`03-voice-deploy.md`、`05-android-voice.md`、`README.md` 索引；`.agents/skills/session-handover/SKILL.md`；工作区修改未提交。
+- 决策：按 T1 → T2 → T3 → T4 → T5 施工；T1 本地配置完成后等待 SSH 授权。未编译、未上真机、未部署、未 push。
+
+### 12.16 — 2026-11-10 T1 本地配置完成，等待服务器 SSH 授权
+
+- 类型：部署 / 阻塞
+- 状态：⏸ 阻塞（等待维护者提供可用 SSH 账号，或将本机公钥加入服务器 `authorized_keys`）
+- 内容：新增 `voice/docker-compose.yml`、`voice/livekit.yaml`、`voice/.env.example`，并将 `voice/.env` 加入 `.gitignore`；镜像固定 `livekit/livekit-server:v1.13.11`，使用 host 网络、7880/tcp、7881/tcp、7882/udp 与 `rtc.use_external_ip: true`。
+- 证据：本地文件已创建；目标服务器 SSH 可达，但 `deploy` / `root` / `ecs-user` / `ubuntu` 等账号的公钥认证均被拒；本机无 `~/.ssh/config`、`server/deploy.env` 或 `private/` 配置。未部署、未生成 token、未跑音频验收、未设置告警。
+- 决策：获得 SSH 授权后继续；真实服务器地址、密钥与 token 不写入仓库。
+
+### 12.17 — 2026-11-11 T1 改由服务器宿主执行，部署脚本自包含
+
+- 类型：部署
+- 状态：🚧 实现中（等待服务器宿主执行输出）
+- 内容：服务器侧 agent 运行在 bwrap 沙箱内，只映射单一 gid，无法访问 docker socket；改为维护者在宿主执行 `su - dsh` 命令。`voice/deploy.sh` 改为自包含：生成 Compose、LiveKit 配置与 `.env`，探测公网 IPv4 写入 `rtc.node_ip`（避开境内常不可达的 Google STUN），启动后输出容器、端口、HTTP、日志与错误扫描；`--check` 可重复自检。
+- 证据：`voice/deploy.sh`（压缩还原字节一致）、`voice/docker-compose.yml`、`voice/livekit.yaml`、`voice/.env.example`、`docs/branches/android-voice/03-voice-deploy.md`；工作区修改未提交。未执行部署、未生成 token、未跑音频验收。
+- 决策：T1 不依赖 SSH；服务器 agent 只做写文件与日志分析，Docker 操作由宿主执行。阶段验收后 push 到 `fork/feat/android-voice`。
+
+### 12.18 — 2026-11-11 T1 LiveKit 容器部署通过
+
+- 类型：部署
+- 状态：🚧 实现中（部署与自检通过，等待公网与音频验收）
+- 内容：宿主以 `dsh` 执行 `~/syncwatch-voice/deploy.sh`；Docker Hub 直连超时，改用 `docker.m.daocloud.io` 拉取同一镜像并重打 `livekit/livekit-server:v1.13.11` 标签；容器 `syncwatch-livekit` 启动，使用 host 网络与显式 `node_ip`。
+- 证据：`docker images` 显示镜像 `0e20c255a2c1`、89.9 MB；服务端 `livekit-server version 1.13.11`；镜像 digest `sha256:0e20c255a2c17000c52d0631b79737a4216c06bc51df13878768df01261c8dfd`；`7880/7881 tcp` 与 `7882 udp` 有监听；本机 `127.0.0.1:7880` 返回 200；日志确认 `using explicit node IP for NAT1To1Ips`；错误扫描未发现明显错误。
+- 遗留：日志 WARN `UDP receive buffer 425984 < 5000000`，T4 前评估 `net.core.rmem_max`；公网可达性、音频验收、流量告警与停服演练未做。
+- 决策：T1 保持 🚧；先在阿里云防火墙放行 7880/tcp、7881/tcp、7882/udp，再从公网验证并做音频验收。
+
+### 12.19 — 2026-11-11 公网 TCP 验收通过，准备音频验收
+
+- 类型：验收 / 测试工具
+- 状态：🚧 实现中（等待音频实走）
+- 内容：从 Windows 开发机对公网验证 `7880/tcp`、`7881/tcp` 均可达，`http://<服务器>:7880/` 返回 200；新增 `voice/test/index.html`，用官方 LiveKit JS SDK（CDN，UMD）做 440 Hz 单音发布/收听测试，仅用于 T1 验收，不属于 Android 客户端实现。
+- 证据：`Test-NetConnection` 两次 `TcpTestSucceeded : True`；`curl.exe` 返回 `200`；测试页文件已创建，未在浏览器实跑。未记录真实公网 IP。
+- 遗留：网关防火墙已放行三端口；UDP 7882 尚未由 WebRTC 客户端实走；音频、告警、停服演练未完成。
+- 决策：下一步在服务器生成 6 小时 publisher/listener token，Windows 发布 440 Hz，手机订阅确认听到；记录两端浏览器/机型与时间。
+
+### 12.20 — 2026-11-11 T1 音频验收通过
+
+- 类型：验收
+- 状态：🚧 实现中（等待告警与停服演练）
+- 内容：Windows Chrome 通过 `voice/test/index.html` 用 publisher token 发布 440 Hz 单音；Android 手机在同一 Wi-Fi 打开同一测试页，用 listener token 订阅，维护者确认正常听到。SDK 改为本地 `livekit-client.umd.min.js`（610592 字节）后，订阅端不再依赖 CDN。
+- 证据：发布端日志 `connected as publisher room 123456`、`publishing 440Hz`；订阅端日志 `connected as listener room 123456`、`subscribed audio`；维护者确认听到声音。token 与公网 IP 未记录。
+- 遗留：手机型号/系统/浏览器版本待补；UDP 7882 与 TCP 7881 的实际选中路径未单独确认；流量告警与停服演练未做。
+- 决策：继续完成 T1 剩余两项（临时告警、停 LiveKit 不影响 `syncwatch`），然后 T1 收尾置 🔶 待验收。
+
+### 12.21 — 2026-11-11 停服演练通过，T1 仅剩告警
+
+- 类型：演练
+- 状态：🚧 实现中（等待告警设置）
+- 内容：执行 `docker compose stop` 停掉 LiveKit 后，`docker ps` 仅剩 `syncwatch`（`Up 5 days (healthy)`），`8995` 仍在 `0.0.0.0` 与 `[::]` 监听；随后 `docker compose start` 恢复，`deploy.sh --check` 重新出现容器运行、三端口监听、HTTP 200、`.env` 完整的 PASS。
+- 证据：`docker compose stop` 输出 `syncwatch-livekit Stopped`；`docker ps` 仅剩 `syncwatch`；`ss -lnt` 显示 8995；恢复后 `--check` 全 PASS（镜像 digest `sha256:0e20c255…`，服务端 `1.13.11`）。
+- 遗留：停服窗口内未用客户端实测播放同步（容器与端口隔离已验证，播放同步留 T4）；临时告警未设置；手机型号/系统/浏览器待补。
+- 决策：告警设置完成后 T1 置 🔶 待验收。
+
+### 12.22 — 2026-11-11 T1 收尾并验收通过（告警豁免）
+
+- 类型：收尾
+- 状态：✅ 已验收（维护者 2026-11-11）
+- 内容：T1 部署、公网 TCP、440 Hz 音频验收、停服隔离与恢复自检均通过；维护者明确决定暂不设置临时流量/费用告警，按已接受风险记录，不阻塞 T1 收尾。T1 置 🔶 待验收。
+- 证据：流水 12.18–12.21；`PROGRESS.md` §9 告警豁免条目；未记录公网 IP、密钥或 token。
+- 遗留：UDP 7882 与 TCP 7881 的实际选中路径未单独确认；停服窗口内未用客户端实测播放同步（留 T4）；手机型号/系统/浏览器待补；工作区修改未提交、未 push。
+- 决策：维护者验收通过 T1，告警豁免维持；下一任务 T2 服务端下发 token。阶段检查点 commit + push 到 `fork/feat/android-voice`，维护者已授权。

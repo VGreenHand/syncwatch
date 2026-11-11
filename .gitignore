@@ -32,6 +32,10 @@ android/app/release/
 server/.env
 server/deploy.env
 
+# ===== 语音服务本地配置 =====
+voice/.env
+voice/test/livekit-client.umd.min.js
+
 # ===== 编辑器 / IDE =====
 .idea/
 .vscode/

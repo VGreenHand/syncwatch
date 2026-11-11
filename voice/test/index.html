@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SyncWatch T1 音频验收</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; max-width: 720px; }
+  label { display: block; margin: 8px 0 2px; }
+  input, textarea { width: 100%; box-sizing: border-box; font: inherit; }
+  textarea { height: 4.5em; }
+  button { font: inherit; margin: 8px 8px 0 0; padding: 6px 12px; }
+  pre { background: #f4f4f4; padding: 8px; white-space: pre-wrap; word-break: break-all; }
+  .hint { color: #666; }
+</style>
+</head>
+<body>
+<h3>SyncWatch T1 音频验收</h3>
+<p class="hint">T1 临时验收页，不属于客户端实现。发布端播放 440 Hz 单音，订阅端确认听到。</p>
+
+<label>LiveKit URL</label>
+<input id="url" placeholder="ws://服务器IP:7880" autocomplete="off">
+
+<label>Room（与 token 一致）</label>
+<input id="room" value="123456" autocomplete="off">
+
+<label>Token</label>
+<textarea id="token" placeholder="粘贴 publisher 或 listener token" autocomplete="off"></textarea>
+
+<div>
+  <button id="publish">发布 440Hz（发布端）</button>
+  <button id="listen">收听（订阅端）</button>
+  <button id="stop">断开</button>
+</div>
+
+<p class="hint">订阅端如果没声音，点一下页面任意位置；仍无声再点音频条上的播放键。</p>
+<pre id="log"></pre>
+
+<!-- 先把 SDK 下载到本目录（约 500 KB，不入库）：
+     curl.exe -L -o livekit-client.umd.min.js https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js
+-->
+<script src="./livekit-client.umd.min.js"></script>
+<script>
+const logEl = document.getElementById('log');
+const log = (...args) => {
+  const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  logEl.textContent += line + '\n';
+  console.log(line);
+};
+
+if (!window.LivekitClient) {
+  log('SDK 加载失败：检查 CDN，或把 UMD 文件下载到同目录后改 script src。');
+}
+
+const { Room, RoomEvent, Track } = window.LivekitClient || {};
+let room = null;
+
+async function connect() {
+  const url = document.getElementById('url').value.trim();
+  const token = document.getElementById('token').value.trim();
+  if (!url || !token) throw new Error('URL 或 Token 为空');
+
+  room = new Room({ adaptiveStream: false, dynacast: false });
+  room.on(RoomEvent.TrackSubscribed, (track) => {
+    if (track.kind === 'audio') {
+      const el = track.attach();
+      el.controls = true;
+      el.autoplay = true;
+      document.body.appendChild(el);
+      el.play().catch(e => log('play blocked:', e.message));
+      log('subscribed audio', track.sid);
+    }
+  });
+  room.on(RoomEvent.ParticipantConnected, p => log('participant joined', p.identity));
+  room.on(RoomEvent.Disconnected, () => log('disconnected'));
+
+  await room.connect(url, token);
+  log('connected as', room.localParticipant.identity, 'room', room.name || '');
+  await room.startAudio().catch(e => log('startAudio:', e.message));
+  return room;
+}
+
+document.getElementById('publish').onclick = async () => {
+  try {
+    await connect();
+    const ctx = new AudioContext();
+    await ctx.resume();
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 440;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.2;
+    const dest = ctx.createMediaStreamDestination();
+    osc.connect(gain).connect(dest);
+    osc.start();
+    const track = dest.stream.getAudioTracks()[0];
+    await room.localParticipant.publishTrack(track, {
+      source: Track.Source.Microphone,
+      name: 'tone-440',
+    });
+    log('publishing 440Hz');
+  } catch (e) {
+    log('ERROR', e.message);
+  }
+};
+
+document.getElementById('listen').onclick = async () => {
+  try {
+    await connect();
+    log('listening');
+  } catch (e) {
+    log('ERROR', e.message);
+  }
+};
+
+document.getElementById('stop').onclick = async () => {
+  if (room) {
+    await room.disconnect();
+    room = null;
+    log('stopped');
+  }
+};
+
+document.addEventListener('click', () => {
+  if (room) room.startAudio().catch(() => {});
+});
+</script>
+</body>
+</html>

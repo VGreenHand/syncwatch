@@ -1,6 +1,6 @@
 # 0001. Android 内置语音：独立 LiveKit 媒体面（fork 扩展）
 
-- 状态：提议（Proposed；fork 先行实施，上游合并前需主项目维护者确认）
+- 状态：提议（Proposed；仅表示上游合并决策未批准；fork 内实施按维护者既有授权先行，计划修订见 `PROGRESS.md` 流水 12.15）
 - 日期：2026-11-06
 - 决策者：SyncWatch 维护者、语音功能贡献者
 - 相关文档：`README.md`、`docs/01-方案设计.md`、`docs/02-同步协议.md`、`docs/05-Android客户端.md`
@@ -47,7 +47,7 @@ Windows 端暂不加入语音；未来如果要做，可复用同一套 LiveKit 
 - LiveKit participant identity 使用「昵称 + 会话后缀」（如 `小明#a3f9`），保证同一房间内唯一；界面仍显示昵称。
 - 后缀在每次 `join` 时生成，重连换新；不复用旧连接的身份。
 - 只有成功加入 SyncWatch 房间的成员才应获得语音 token。
-- 语音 token 的权限限定为：加入指定房间、发布音频、订阅音频；不授予视频、录制或管理员权限。
+- 语音 token 的权限限定为：加入指定房间、发布麦克风音频、订阅房间已发布轨道；`canPublishSources` 只含 microphone，`canPublishData=false`；不授予视频、录制或管理员权限。`canSubscribe` 订阅的是房间内所有已发布轨道；第一版只有麦克风，因此等价于音频订阅，未来若允许视频需重新评估。
 
 ### 4. MVP 由 `hello` 下发连接地址与短期 token
 
@@ -55,6 +55,7 @@ SyncWatch 服务器在成员加入成功时，随 `hello` 返回 `voiceUrl` 与 
 
 - API Secret 只保存在服务器，绝不写入 APK 或仓库。
 - 只有 `LIVEKIT_URL`、`LIVEKIT_API_KEY`、`LIVEKIT_API_SECRET` 全部配置时才下发两个字段；缺任一项时都不下发，客户端隐藏语音入口。
+- 配置不完整或签发失败时不阻断普通入房，两个字段都不下发；服务端日志不得包含 API Secret、完整 token 或可复用凭证。
 - `voiceUrl` 是连接地址，不是秘密；`voiceToken` 是 bearer 凭证，payload 可被解码，不得写入日志或放进 URL。
 - token 有效期设为 6 小时，覆盖一两集电视剧或一部电影；过期或重连时重新加入 SyncWatch 获取新 token。本阶段仅两人私有使用，暂不对外服务。
 - MVP 阶段使用 `ws://`，token 和房间密码一样可能被链路窃听；在对外提供服务前必须加 TLS，并重新评估 token 有效期、房间码复用风险与独立 `/voice-token` 接口。
@@ -70,23 +71,33 @@ LiveKit 与 `syncwatch` 部署在同一台服务器，但是独立容器；沿�
 | UDP | 7882 | WebRTC 媒体（单端口 UDP mux） |
 | UDP | 3478 | TURN 兜底，默认关闭；仅在直连失败时启用 |
 
-云端 NAT 后需要开启 `rtc.use_external_ip: true`，让 LiveKit 对外宣告公网地址。安全组只放行上述端口，尽量限制来源 IP。如果 LiveKit 配置无法使用单端口 UDP，再回退到官方端口范围，并单独记录原因。
+云端 NAT 后需要让 LiveKit 对外宣告公网地址：优先由部署脚本写入 `rtc.node_ip`（不依赖 STUN），未使用脚本时回退 `rtc.use_external_ip: true`。安全组只放行上述端口，尽量限制来源 IP。如果 LiveKit 配置无法使用单端口 UDP，再回退到官方端口范围，并单独记录原因。
 
 ### 6. 后台与音频路由
 
+- 语音模式由 `hello` 是否同时含 `voiceUrl` 与 `voiceToken` 判定；未配置语音时，Android 生命周期与同步行为保持上游现状。
 - 前台：麦克风和扬声器都可用，但只有检测到耳机输出时才允许开麦。
 - 分屏失去焦点：`onPause` 时关闭麦克风，视频和远端音频继续；点回本 App 后恢复麦克风。
-- 切到后台（不可见）：`onStop` 时暂停视频并断开 LiveKit；这是**本地暂停**，不发送 `pause`，不把整个房间停住；不依赖前台 Service 保活。
+- 切到后台（不可见）：`onStop` 时暂停视频并断开 LiveKit，保留 SyncWatch 信令连接；这是**本地暂停**，不发送 `pause`，不把整个房间停住；显式抑制 `onLocalPause` 广播；不依赖前台 Service 保活。
 - 回前台：**不自动 seek**；保持本机暂停，`onResume` 重连语音；用户商量后手动 seek，按现有 `seek` 语义同步。手动静止期间暂停心跳位置上报，避免服务端 `forceSeek` 自动跳转。
-- 回前台处于「待对齐」状态时，先禁止直接播放；用户 seek 到商定位置后再允许播放，避免把全房间拉回旧进度。
+- 回前台处于「待对齐」状态时，先禁止直接播放；收到 `sync` 只更新房间目标与成员状态，不自动 seek/play；用户 seek 到商定位置后再允许播放，避免把全房间拉回旧进度。
 - 用户主动暂停仍走现有 `pause` 广播；只有生命周期自动暂停是本地行为。
 - 锁屏按 `onStop` 处理；若个别厂商不触发，T3 用亮屏/息屏广播兜底。
 - 麦克风不可用（权限被拒、被其他应用占用、蓝牙路由异常）时只禁用发言，不阻断收听，也不影响播放同步；界面提示具体原因。
 - 第一版不主动做 ducking（压低影片音量）；如果 Android 音频焦点或 WebRTC 通信模式强制压低/暂停 ExoPlayer，以双机原型实测结果为准，并记录为已知限制。
 
+| 状态 | 触发 | 视频 | 麦克风 | 语音连接 | 同步行为 |
+|---|---|---|---|---|---|
+| `NORMAL` | 默认 | 正常 | 耳机满足时开 | 连接 | 现有 `hello` / `sync` |
+| `BACKGROUND_LOCAL_PAUSE` | `onStop` | 本地暂停，不广播 | 关 | 断开 | 停发心跳位置，不发 `pause` |
+| `FOREGROUND_PENDING_ALIGN` | `onStart` / `onResume` | 保持暂停 | 耳机满足时恢复 | 重连 | 忽略 `sync` 的自动 seek/play；手动 seek 后回 `NORMAL` |
+
+分屏焦点在 API 29+ 用 `onTopResumedActivityChanged` 判断，API 24–28 用 `onPause` / `onResume` 兜底；`isInMultiWindowMode()` 只用于区分分屏。失去焦点只关麦，保持视频与远端音频。
+
 ### 7. 成本与滥用防护
 
-- 服务器按流量计费，必须配置月度流量/费用告警；超过阈值时暂停语音服务，不影响播放同步。
+- 服务器按流量计费，必须配置月度流量/费用告警；T1 先设 100 GB/月或月度预算 50%（取较低者）作为临时线，T4 按实测码率调整。
+- 超过阈值时只停 `voice` 容器，不影响播放同步；停服步骤与演练结果写入 T1 证据。
 - 语音 token 短期有效，房间仍需密码；LiveKit 不对公网匿名开放。
 - 两人使用不需要大带宽；200 Mbps 峰值不是瓶颈，账单和端口暴露才是风险。
 
@@ -141,19 +152,21 @@ LiveKit 与 `syncwatch` 部署在同一台服务器，但是独立容器；沿�
 
 - 两台 Android 真机（Android 7.0+）加入同一 SyncWatch 房间，戴耳机可全双工对话。
 - 目标延迟：局域网/国内宽带 p50 ≤ 300 ms、p95 ≤ 600 ms；以实测记录为准。
+- T1 的音频验收必须由一个参与者发布已知音频、另一个公网客户端订阅听到；`--publish-demo` 只发布视频，不能作为音频验收。
 - 切后台后本机视频暂停、语音断开，但**不暂停对方**；分屏失去焦点只关麦，视频与远端音频继续；回前台保持本机暂停并重连语音，用户手动 seek 后恢复，不自动追赶。
+- 未配置 LiveKit 时，Android 生命周期与同步行为保持上游现状。
 - 无耳机时不能开麦，但仍能听到对方。
 - 拒绝麦克风权限或麦克风被其他应用占用时，仍能听到对方，播放同步正常。
 - 5% 丢包下语音仍可懂；Wi-Fi 切换 4G 后能重连。
-- 连续看片 30 分钟，语音不中断、不导致播放同步明显漂移。
+- 连续看片 30 分钟，语音不中断、不导致播放同步明显漂移；T4 记录测量工具、样本数与原始结果。
 - 流量告警可触发，语音服务可独立停止而不影响 `syncwatch`。
 
 ## 后续工作
 
-1. 安装 Android Studio / SDK 34，确认 LiveKit Android SDK 版本与 minSdk 24 兼容。
+1. 安装 Android Studio / SDK 34，固定 LiveKit Android SDK 版本，先验证 minSdk 24 兼容与最小连接/发布/订阅，再改 UI。
 2. 在 `server/main.go` 增加可选的 LiveKit token 生成，随 `hello` 下发；配置缺失时语音关闭。
-3. 增加 `RECORD_AUDIO` 权限；实现耳机检测、分屏/后台生命周期与麦克风开关。
-4. 增加 `voice/` Docker Compose、LiveKit 配置、端口说明、流量告警和部署文档。
+3. 增加 `RECORD_AUDIO`（按 SDK 需要补 `MODIFY_AUDIO_SETTINGS`）；实现耳机检测、分屏/后台状态机与麦克风开关；第一版不加前台 Service 权限。
+4. 增加 `voice/` Docker Compose、LiveKit 配置、端口说明、临时流量告警、停服演练和部署文档。
 5. 用两台真机做双机原型，先验证音频焦点、回声、分屏/后台和耳机路由，再定 UI。
 6. 补 `docs/branches/android-voice/` 的协议补充、部署与 Android 说明；上游 `docs/02`、`docs/05`、`README.md` 原文不动，PR 被接受后再回填。
 

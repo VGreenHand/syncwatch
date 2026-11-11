@@ -23,7 +23,25 @@
 - room = SyncWatch 的 6 位房间码。
 - identity = 昵称 + 每次 `join` 生成的短后缀（如 `小明#a3f9`）；界面仍显示昵称。
 - 有效期 6 小时；过期或重连时重新 `join` 获取新 token。
-- 权限只含加入指定房间、发布音频、订阅音频；不授予视频、录制或管理员权限。
+- 权限只含加入指定房间、发布麦克风音频、订阅房间已发布轨道；不授予视频、录制或管理员权限。
+
+| 权限 | 值 |
+|---|---|
+| `roomJoin` | `true` |
+| `room` | SyncWatch 房间码 |
+| `canPublish` | `true` |
+| `canPublishSources` | `["microphone"]` |
+| `canSubscribe` | `true` |
+| `canPublishData` | `false` |
+| `roomAdmin` / `roomCreate` / `roomRecord` / `recorder` | `false` |
+
+`canSubscribe` 订阅的是房间内所有已发布轨道；第一版只发布麦克风，因此等价于音频订阅。未来若允许视频，需要重新评估这个权限。
+
+## 异常路径
+
+- 配置不完整或签发失败时不阻断普通 `join`，`voiceUrl` 与 `voiceToken` 都不下发，客户端隐藏语音入口。
+- 服务端日志不得打印 API Secret、完整 token 或可复用凭证；排障只记录 token 长度和非敏感 claims。
+- 旧 Android、Windows 控制台和 GUI 应忽略新字段并正常入房；T2 用 `tools/sim` / `tools/ctl` 和实际客户端各验证一次。
 
 ## 安全边界
 
