@@ -303,6 +303,13 @@
                 android:layout_weight="1" />
 
             <ImageButton
+                android:id="@+id/btnVoice"
+                style="@style/Widget.Sync.IconButton"
+                android:contentDescription="打开麦克风"
+                android:src="@drawable/ic_mic_off"
+                android:visibility="gone" />
+
+            <ImageButton
                 android:id="@+id/btnFullscreen"
                 style="@style/Widget.Sync.IconButton"
                 android:contentDescription="进入全屏"

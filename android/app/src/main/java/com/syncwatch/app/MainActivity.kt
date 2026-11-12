@@ -1,5 +1,6 @@
 package com.syncwatch.app
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.ClipData
@@ -7,10 +8,13 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
@@ -34,6 +38,7 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -45,6 +50,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import androidx.lifecycle.Lifecycle
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
@@ -54,6 +60,8 @@ import kotlin.math.roundToLong
 
 class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.PlayerAdapter,
     PlayerControlOverlay.Listener, PlayerGestureController.Listener {
+
+    private enum class VoiceLifecycle { NONE, NORMAL, BACKGROUND_LOCAL_PAUSE, FOREGROUND_PENDING_ALIGN }
 
     private lateinit var joinScreen: ScrollView
     private lateinit var playerScreen: View
@@ -114,6 +122,14 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     private var playerInitialized = false
     private var gestureController: PlayerGestureController? = null
     private var engine: SyncEngine? = null
+    private var voiceClient: VoiceClient? = null
+    private var voiceEnabled = false
+    private var voiceActive = false
+    private var voiceConnecting = false
+    private var micOn = false
+    private var voiceLifecycle = VoiceLifecycle.NONE
+    private var voiceUrl = ""
+    private var voiceToken = ""
 
     private var fileUri: Uri? = null
     private var fileName = ""
@@ -172,6 +188,84 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         clearFormError()
     }
 
+    private val micPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            if (hasHeadsetOutput()) setMicEnabled(true) else showNotice("请先连接耳机再开麦，避免回声")
+        } else {
+            showNotice("未授予麦克风权限，只能收听语音")
+        }
+        updateMicUi()
+    }
+
+    @SuppressLint("InlinedApi")
+    private val headsetOutputTypes = setOf(
+        AudioDeviceInfo.TYPE_WIRED_HEADSET,
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+        AudioDeviceInfo.TYPE_USB_HEADSET,
+        AudioDeviceInfo.TYPE_HEARING_AID,
+        AudioDeviceInfo.TYPE_BLE_HEADSET
+    )
+
+    private val audioDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) =
+            handleAudioDevicesChanged()
+
+        override fun onAudioDevicesRemoved(removedDevices: Array<AudioDeviceInfo>) =
+            handleAudioDevicesChanged()
+    }
+
+    private val voiceListener = object : VoiceClient.Listener {
+        override fun onVoiceConnected() {
+            voiceConnecting = false
+            voiceActive = true
+            updateMicUi()
+            showNotice("语音已连接，戴耳机后可开麦")
+        }
+
+        override fun onVoiceReconnecting() {
+            showNotice("语音重连中…")
+        }
+
+        override fun onVoiceReconnected() {
+            voiceConnecting = false
+            voiceActive = true
+            updateMicUi()
+            showNotice("语音已恢复")
+        }
+
+        override fun onVoiceDisconnected(reason: String) {
+            if (!voiceActive && !voiceConnecting) return
+            voiceConnecting = false
+            voiceActive = false
+            micOn = false
+            updateMicUi()
+            showNotice("语音已断开")
+        }
+
+        override fun onRemoteAudioSubscribed(name: String) {
+            showNotice("已听到 $name 的声音")
+        }
+
+        override fun onRemoteAudioUnsubscribed(name: String) {}
+
+        override fun onVoiceError(message: String) {
+            if (!voiceActive && !voiceConnecting) return
+            voiceConnecting = false
+            voiceActive = false
+            micOn = false
+            updateMicUi()
+            showNotice("语音不可用：$message")
+        }
+
+        override fun onVoiceSubscriptionError(message: String) {
+            showNotice(message)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -211,6 +305,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
             insets
         }
         bindBackNavigation()
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, mainHandler)
         updateHomeCardWidth()
 
         handleDebugIntent()
@@ -408,6 +503,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         heartbeatStarted = false
         fileInfoSent = false
         lastBuffering = false
+        resetVoiceState()
 
         hideKeyboard()
         setupPlayer(uri)
@@ -724,6 +820,151 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     override fun isBuffering(): Boolean =
         playerInitialized && player.playbackState == Player.STATE_BUFFERING
 
+    // ======================== 语音 ========================
+
+    override fun onVoiceConfig(voiceUrl: String, voiceToken: String) {
+        if (voiceUrl.isBlank() || voiceToken.isBlank()) return
+        val firstConfig = !voiceEnabled
+        voiceEnabled = true
+        this.voiceUrl = voiceUrl
+        this.voiceToken = voiceToken
+        if (firstConfig) {
+            voiceLifecycle = if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                VoiceLifecycle.NORMAL
+            } else {
+                VoiceLifecycle.BACKGROUND_LOCAL_PAUSE
+            }
+            playerControl.setVoiceVisible(true)
+            updateMicUi()
+        }
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            connectVoice()
+        }
+    }
+
+    private fun connectVoice() {
+        if (!voiceEnabled || voiceConnecting || voiceActive) return
+        if (voiceLifecycle == VoiceLifecycle.BACKGROUND_LOCAL_PAUSE) return
+        voiceConnecting = true
+        val client = voiceClient ?: VoiceClient(this).also { voiceClient = it }
+        client.connect(voiceUrl, voiceToken, voiceListener)
+    }
+
+    private fun toggleVoiceMic() {
+        if (!voiceEnabled) return
+        if (micOn) {
+            setMicEnabled(false)
+            return
+        }
+        if (!voiceActive) {
+            connectVoice()
+            showNotice("正在连接语音，请稍候")
+            return
+        }
+        if (voiceLifecycle != VoiceLifecycle.NORMAL) {
+            showNotice("先回到前台并对齐进度，再开麦")
+            return
+        }
+        if (!hasHeadsetOutput()) {
+            showNotice("请先连接耳机再开麦，避免回声")
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        setMicEnabled(true)
+    }
+
+    private fun setMicEnabled(enabled: Boolean) {
+        if (enabled && (!voiceActive || !hasHeadsetOutput())) {
+            updateMicUi()
+            return
+        }
+        val client = voiceClient
+        if (client == null) {
+            micOn = false
+            updateMicUi()
+            return
+        }
+        client.setMicrophoneEnabled(enabled) { ok, error ->
+            micOn = ok && enabled
+            if (!ok) showNotice("麦克风不可用：${error ?: "未知错误"}")
+            updateMicUi()
+        }
+    }
+
+    private fun updateMicUi() {
+        playerControl.setVoiceVisible(voiceEnabled)
+        playerControl.setMicOn(micOn)
+    }
+
+    private fun hasHeadsetOutput(): Boolean = try {
+        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .any { it.type in headsetOutputTypes }
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun handleAudioDevicesChanged() {
+        if (micOn && !hasHeadsetOutput()) {
+            setMicEnabled(false)
+            showNotice("耳机已断开，已关闭麦克风")
+        }
+    }
+
+    private fun disableMicOnFocusLoss() {
+        if (voiceEnabled && micOn) {
+            setMicEnabled(false)
+            showNotice("失去前台焦点，已关闭麦克风")
+        }
+    }
+
+    private fun enterBackgroundLocalPause() {
+        if (voiceLifecycle == VoiceLifecycle.BACKGROUND_LOCAL_PAUSE) return
+        voiceLifecycle = VoiceLifecycle.BACKGROUND_LOCAL_PAUSE
+        engine?.setSyncSuspended(true)
+        engine?.notifyLocalPaused()
+        micOn = false
+        updateMicUi()
+        voiceClient?.disconnect()
+        voiceActive = false
+        voiceConnecting = false
+        if (playerInitialized && player.playWhenReady) player.pause()
+    }
+
+    private fun enterForegroundPendingAlign() {
+        if (voiceLifecycle != VoiceLifecycle.BACKGROUND_LOCAL_PAUSE) return
+        voiceLifecycle = VoiceLifecycle.FOREGROUND_PENDING_ALIGN
+        engine?.setSyncSuspended(true)
+        if (playerInitialized && player.playWhenReady) player.pause()
+        connectVoice()
+        showNotice("已回到前台，拖动进度条对齐后再继续播放")
+    }
+
+    private fun alignFromPending() {
+        if (voiceLifecycle != VoiceLifecycle.FOREGROUND_PENDING_ALIGN) return
+        voiceLifecycle = VoiceLifecycle.NORMAL
+        engine?.setSyncSuspended(false)
+        showNotice("已对齐，可以继续播放")
+    }
+
+    private fun resetVoiceState() {
+        voiceClient?.disconnect()
+        voiceClient = null
+        voiceEnabled = false
+        voiceActive = false
+        voiceConnecting = false
+        micOn = false
+        voiceLifecycle = VoiceLifecycle.NONE
+        voiceUrl = ""
+        voiceToken = ""
+        playerControl.setVoiceVisible(false)
+        playerControl.setMicOn(false)
+    }
+
     // ======================== 控制层回调 ========================
 
     override fun onBack() {
@@ -732,6 +973,10 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     override fun onTogglePlay() {
         if (!playerInitialized) return
+        if (voiceLifecycle == VoiceLifecycle.FOREGROUND_PENDING_ALIGN) {
+            showNotice("回来后先拖动进度条对齐，再继续播放")
+            return
+        }
         if (player.playWhenReady) {
             player.pause()
         } else {
@@ -745,6 +990,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         if (!playerInitialized) return
         val duration = player.duration
         if (duration <= 0) return
+        alignFromPending()
         val target = (player.currentPosition + deltaSeconds * 1000L).coerceIn(0L, duration)
         player.seekTo(target)
         playerControl.updateProgress(target, duration)
@@ -764,6 +1010,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         if (!playerInitialized) return
         val duration = player.duration
         if (duration > 0) {
+            alignFromPending()
             player.seekTo(positionMs.coerceIn(0L, duration))
             playerControl.updateProgress(positionMs, duration)
         }
@@ -787,6 +1034,10 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     override fun onSpeed() {
         showSpeedDialog()
+    }
+
+    override fun onToggleVoiceMic() {
+        toggleVoiceMic()
     }
 
     // ======================== 画面手势回调 ========================
@@ -843,6 +1094,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
             playerControl.hideSeekPreview()
             return
         }
+        alignFromPending()
         player.seekTo(targetMs.coerceIn(0L, duration))
         playerControl.hideSeekPreview()
         playerControl.updateProgress(targetMs.coerceIn(0L, duration), duration)
@@ -1306,6 +1558,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
         engine?.close()
         engine = null
+        resetVoiceState()
         releasePlayer()
         currentRoom = ""
         pendingRequestedRoom = ""
@@ -1442,15 +1695,39 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (isPlayerVisible && voiceLifecycle == VoiceLifecycle.BACKGROUND_LOCAL_PAUSE) {
+            enterForegroundPendingAlign()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && isPlayerVisible && isInMultiWindowMode) {
+            disableMicOnFocusLoss()
+        }
+    }
+
+    override fun onTopResumedActivityChanged(isTopResumed: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumed)
+        if (!isTopResumed) disableMicOnFocusLoss()
+    }
+
     override fun onStop() {
         super.onStop()
-        if (playerInitialized && isPlayerVisible && player.playWhenReady) {
+        if (!isPlayerVisible) return
+        if (voiceEnabled) {
+            enterBackgroundLocalPause()
+        } else if (playerInitialized && player.playWhenReady) {
             player.pause()
         }
     }
 
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
+        audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
+        resetVoiceState()
         engine?.close()
         engine = null
         releasePlayer()

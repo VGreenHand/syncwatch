@@ -1,6 +1,7 @@
 package com.syncwatch.app
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
@@ -39,6 +40,7 @@ class PlayerControlOverlay @JvmOverloads constructor(
         fun onOpenMembers()
         fun onCopyRoom()
         fun onSpeed()
+        fun onToggleVoiceMic()
     }
 
     var listener: Listener? = null
@@ -55,6 +57,7 @@ class PlayerControlOverlay @JvmOverloads constructor(
     private val btnLock: ImageButton
     private val btnMembers: ImageButton
     private val btnFullscreen: ImageButton
+    private val btnVoice: ImageButton
     private val btnSpeed: TextView
     private val seekBar: SeekBar
     private val currentTime: TextView
@@ -94,6 +97,7 @@ class PlayerControlOverlay @JvmOverloads constructor(
         btnLock = findViewById(R.id.btnControllerLock)
         btnMembers = findViewById(R.id.btnControllerMembers)
         btnFullscreen = findViewById(R.id.btnFullscreen)
+        btnVoice = findViewById(R.id.btnVoice)
         btnSpeed = findViewById(R.id.btnSpeed)
         seekBar = findViewById(R.id.playerSeekBar)
         currentTime = findViewById(R.id.currentTime)
@@ -136,6 +140,10 @@ class PlayerControlOverlay @JvmOverloads constructor(
             revealControls()
             listener?.onSpeed()
         }
+        btnVoice.setOnClickListener {
+            revealControls()
+            listener?.onToggleVoiceMic()
+        }
         roomBadge.setOnClickListener {
             listener?.onCopyRoom()
         }
@@ -176,6 +184,18 @@ class PlayerControlOverlay @JvmOverloads constructor(
 
     fun setRoomCode(code: String) {
         roomBadge.text = if (code.isBlank()) "房间码 —" else "房间码 $code"
+    }
+
+    fun setVoiceVisible(visible: Boolean) {
+        btnVoice.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
+    fun setMicOn(on: Boolean) {
+        btnVoice.setImageResource(if (on) R.drawable.ic_mic else R.drawable.ic_mic_off)
+        btnVoice.contentDescription = if (on) "关闭麦克风" else "打开麦克风"
+        btnVoice.imageTintList = ColorStateList.valueOf(
+            context.getColor(if (on) R.color.brand_light else R.color.text_secondary)
+        )
     }
 
     fun setSpeed(rate: Float) {
