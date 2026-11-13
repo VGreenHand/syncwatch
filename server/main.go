@@ -39,6 +39,9 @@ const (
 	RATE_LIMIT      = 40            // 每秒每连接最大消息数(粗略)
 	ROOM_IDLE_TTL   = 2 * time.Hour // 空房间保留时长
 	VOICE_TOKEN_TTL = 6 * time.Hour // 语音 token 有效期
+	// 同名接管阈值：成员超过该时长没有心跳，视为旧连接已死，
+	// 允许新连接接管同名身份。取 3 个心跳周期，避免网络抖动误踢活人。
+	TAKEOVER_STALE = 15 * time.Second
 )
 
 // ---------- 消息 ----------
@@ -179,6 +182,9 @@ type Member struct {
 	quota    int     // 简单限流
 	quotaAt  time.Time
 	closed   sync.Once
+	// superseded 表示该成员已被同名的新连接接管。
+	// 接管时旧连接不再广播 leave/members，避免把新成员一起“送走”。
+	superseded bool
 	// 上一次心跳是否已经超阈值。连续两次才纠偏，单次抖动不折腾用户。
 	driftWarned bool
 }
@@ -259,9 +265,12 @@ func (m *Member) close(reason string) {
 			m.room.mu.Lock()
 			delete(m.room.members, m)
 			room := m.room
+			superseded := m.superseded
 			m.room.mu.Unlock()
-			room.broadcast(nil, Msg{Type: "leave", Name: m.name})
-			room.broadcast(nil, Msg{Type: "members", Members: room.memberInfos()})
+			if !superseded {
+				room.broadcast(nil, Msg{Type: "leave", Name: m.name})
+				room.broadcast(nil, Msg{Type: "members", Members: room.memberInfos()})
+			}
 			cleanupRoom(room)
 		}
 		close(m.done)
@@ -524,12 +533,22 @@ func (m *Member) handleJoin(msg Msg) string {
 		r.mu.Unlock()
 		return "room full (max " + strconv.Itoa(MAX_MEMBERS) + ")"
 	}
-	// 重名检查
+	// 重名检查：旧连接超过 TAKEOVER_STALE 没有心跳，视为已断线的残留会话，
+	// 允许新连接接管同名身份；否则仍然拒绝，避免两台设备同时用同一个昵称。
+	var stale *Member
 	for mem := range r.members {
 		if mem.name == msg.Name {
-			r.mu.Unlock()
-			return "name already taken in room"
+			if time.Since(mem.lastHB) <= TAKEOVER_STALE {
+				r.mu.Unlock()
+				return "name already taken in room"
+			}
+			stale = mem
+			break
 		}
+	}
+	if stale != nil {
+		delete(r.members, stale)
+		stale.superseded = true
 	}
 	r.members[m] = true
 	r.emptySince = time.Time{} // 有人回来了，取消空置计时
@@ -538,6 +557,12 @@ func (m *Member) handleJoin(msg Msg) string {
 	state, pos, anchor, rate := r.snapshot()
 	members := r.memberInfos()
 	r.mu.Unlock()
+
+	if stale != nil {
+		// 锁外关闭，避免旧连接的清理回调再次获取房间锁造成死锁。
+		go stale.close("superseded by reconnect")
+		log.Printf("[room %s] %s takeover after stale connection", r.code, m.name)
+	}
 
 	// 语音是可选伴生能力：配置缺失或签发失败时不下发字段，不影响普通入房。
 	voiceURL, voiceToken := "", ""
