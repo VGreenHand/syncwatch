@@ -14,13 +14,13 @@
 | 最后更新 | 2026-11-13 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；与 `fork/feat/android-voice` 同步，T1 提交 `37a6234`、T2 提交 `0c146b6`、T3 提交 `f240827` 已 push） |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2 已验收（本地 + 隔离服务器副本证据）；T3 真机部分通过（语音按钮/开关、后台提示、无耳机拒绝、LiveKit 入房并发布音频轨），待补远端接收等项；T4–T5 未开始〔流水 12.25〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2 已验收（本地 + 隔离服务器副本证据）；T3 ✅ 已验收（单机真机通过；分屏退出房间为维护者接受的已知偏差）；T4–T5 未开始〔流水 12.26〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.25（2026-11-12） |
-| 下一步 | 补验 440Hz 远端接收、开麦时拔耳机自动关麦、回前台后播放拦截与后台不广播 `pause` 的时间点对照；通过后 T3 转 ✅ 并进入 T4 双机；分屏退出房间已由维护者决定搁置〔流水 12.25〕 |
+| 最近刷新 | 流水 12.26（2026-11-13） |
+| 下一步 | 进入 T4 双机联调：优先真机对真机，`f04_test` 模拟机仅作功能预演；同时复测 LiveKit clock skew/jitter 与 UDP/TCP 实际路径；通过后做 T5 文档〔流水 12.26〕 |
 | 开放决策 | 见 §9 待定表（TLS、SDK 版本、流量阈值、机型清单等；LiveKit 服务端版本与网络已定） |
-| 已验证 | 源码通读（v0.5.1）、开工前设计口径与开发计划已入库、T1–T4 验收口径已具体化、`voice/` 配置与自包含 `deploy.sh` 已就绪；服务器已部署 `syncwatch-livekit`，镜像 `v1.13.11`，三端口监听，本机与公网 HTTP 200，`node_ip` 生效；T1 音频验收通过；停 LiveKit 后 `syncwatch` 仍 healthy、8995 仍监听，恢复后自检全 PASS；维护者决定暂不设置临时告警并验收通过 T1；T1 收尾与账本提交已 push 至 `fork/feat/android-voice`；T2 服务端、`tools/sim`、`tools/ctl` 构建通过，本地 `hello` 的 token 签名/TTL/权限矩阵、缺配置关闭路径、并发入房与 `sync` 广播均通过；T2 隔离服务器副本使用真实 `LIVEKIT_*`，容器健康、token `sig=ok`、TTL `6h0m0s`、权限矩阵与 A/B `sync` 广播通过，生产 `syncwatch` 未受影响的 8995 保持 healthy；T3.0 固定 LiveKit Android SDK `2.30.0`，APK 构建通过（minSdk 24 / compileSdk 34 / JDK 17 / Gradle 8.7），`testDebugUnitTest` 与 `lintDebug` 通过，合并后权限仅新增 `RECORD_AUDIO`（另有 SDK 提供的 `MODIFY_AUDIO_SETTINGS` 与旧蓝牙权限）；2026-11-12 真机 `nubia NX799J`（Android 16 / API 36）验证：语音按钮出现且可开关、切后台回前台提示正常、无耳机时拒绝开麦；LiveKit 日志确认 `Tester` 以 Android SDK 2.30.0 入房并发布音频轨，会话 2m4s，token 被服务端接受〔流水 12.25〕 |
-| 未验证 | UDP 7882 与 TCP 7881 的实际选中路径未单独确认；停服窗口内未用客户端实测播放同步；T3 仍待补验：远端 440Hz 接收、开麦时拔耳机自动关麦、回前台后播放拦截、后台不广播 `pause` 的时间点对照；分屏检测会退出房间（维护者已决定搁置）；无语音配置回归已通过；生产部署已更新至 T2 代码；Windows 控制台/GUI/Android 旧客户端未实际入房（仅源码与 `tools/ctl` 兼容验证）；签发失败路径未强制触发〔流水 12.25〕 |
+| 已验证 | 源码通读（v0.5.1）、开工前设计口径与开发计划已入库、T1–T4 验收口径已具体化、`voice/` 配置与自包含 `deploy.sh` 已就绪；服务器已部署 `syncwatch-livekit`，镜像 `v1.13.11`，三端口监听，本机与公网 HTTP 200，`node_ip` 生效；T1 音频验收通过；停 LiveKit 后 `syncwatch` 仍 healthy、8995 仍监听，恢复后自检全 PASS；维护者决定暂不设置临时告警并验收通过 T1；T1 收尾与账本提交已 push 至 `fork/feat/android-voice`；T2 服务端、`tools/sim`、`tools/ctl` 构建通过，本地 `hello` 的 token 签名/TTL/权限矩阵、缺配置关闭路径、并发入房与 `sync` 广播均通过；T2 隔离服务器副本使用真实 `LIVEKIT_*`，容器健康、token `sig=ok`、TTL `6h0m0s`、权限矩阵与 A/B `sync` 广播通过，生产 `syncwatch` 未受影响的 8995 保持 healthy；T3.0 固定 LiveKit Android SDK `2.30.0`，APK 构建通过（minSdk 24 / compileSdk 34 / JDK 17 / Gradle 8.7），`testDebugUnitTest` 与 `lintDebug` 通过，合并后权限仅新增 `RECORD_AUDIO`（另有 SDK 提供的 `MODIFY_AUDIO_SETTINGS` 与旧蓝牙权限）；2026-11-12 真机 `nubia NX799J`（Android 16 / API 36）验证：语音按钮出现且可开关、切后台回前台提示正常、无耳机时拒绝开麦；LiveKit 日志确认 `Tester` 以 Android SDK 2.30.0 入房并发布音频轨，会话 2m4s，token 被服务端接受；2026-11-13 真机补齐：440Hz 远端接收通过、开麦时拔耳机自动关麦、后台本地暂停且服务器无 `pause` 广播、回前台播放被拦截、seek 后恢复〔流水 12.26〕 |
+| 未验证 | UDP 7882 与 TCP 7881 的实际选中路径未单独确认；停服窗口内未用客户端实测播放同步；分屏检测会退出房间（维护者已接受并搁置）；LiveKit 日志有 clock skew / jitter 警告待 T4 复测；Windows 控制台/GUI/Android 旧客户端未实际入房（仅源码与 `tools/ctl` 兼容验证）；签发失败路径未强制触发〔流水 12.26〕 |
 | 导航 | 本表 → ADR → `docs/02` → §7 当前任务行；历史见 §12 |
 
 ## 1. 目标
@@ -136,7 +136,7 @@ docker compose version # 服务器上需要
 |---|---|---|---|
 | T1 LiveKit 独立部署 | ✅ 已验收 | 发布端发送已知音频，另一公网客户端听到；端口、告警与停服演练符合预期 | 部署/公网 TCP/440 Hz 音频/停服隔离均通过；告警按维护者决定豁免〔流水 12.18–12.22〕 |
 | T2 服务器下发 token | ✅ 已验收 | `hello` 含 `voiceUrl` 与 6h token；权限限定麦克风发布与音频订阅；异常时不泄露凭证 | 本地 `tools/sim`：`sig=ok`、TTL `6h0m0s`、权限矩阵通过；缺配置/错误 URL 为 `voice=off`；`tools/ctl` 入房与并发 `sync` 通过；隔离服务器副本使用真实 `LIVEKIT_*` 通过，生产未动；维护者 2026-11-11 确认验收；旧客户端真机与签发失败路径待 T3/T4〔流水 12.23〕 |
-| T3 Android 接入 | 🔶 待验收 | 单机能进房听到远端；后台本地暂停不广播；回前台待对齐，手动 seek 后恢复；分屏只关麦；无语音配置时行为不变 | 代码完成，构建/单测/lint 通过；真机部分通过：按钮/开关、后台回前台提示、无耳机拒绝、LiveKit 入房并发布音频轨（NX799J/Android 16/SDK 2.30.0，2m4s）；待补远端接收、开麦拔耳机、播放拦截、后台不广播 `pause` 对照；分屏退出房间已搁置〔流水 12.25〕 |
+| T3 Android 接入 | ✅ 已验收 | 单机能进房听到远端；后台本地暂停不广播；回前台待对齐，手动 seek 后恢复；分屏只关麦；无语音配置时行为不变 | 2026-11-13 真机 NX799J/Android 16：440Hz 远端接收、开麦拔耳机自动关麦、后台本地暂停且无 `pause` 广播、回前台播放拦截、seek 恢复均通过；分屏退出房间作为已知偏差由维护者接受〔流水 12.26〕 |
 | T4 双机联调 | ⬜ 未开始 | 按固定采样、丢包、切换与 30 分钟口径通过，并记录机型、系统、网络与原始数据 | 待补 |
 | T5 文档 | ⬜ 未开始 | fork 文档目录补齐语音说明；上游 docs/README 原文不动 | 待补 |
 
@@ -468,3 +468,12 @@ docker compose version # 服务器上需要
 - 证据：服务器 `syncwatch` 日志 11:39:48 `[voice] token issuance enabled`，11:56–11:59 `Tester` 入房与 `seek`/`play`/`pause`；LiveKit 日志 11:59:21–12:01:25 音频轨统计与 participant closing（`sdk=ANDROID version=2.30.0 osVersion=16 deviceModel=nubia NX799J`）；用户 2026-11-12 实机回报。提交 `f240827` 于 2026-11-13 push 至 `fork/feat/android-voice`。
 - 遗留：未验证远端 440Hz 接收、开麦时拔耳机自动关麦、回前台后播放拦截、后台不广播 `pause` 的时间点对照；分屏会退出房间（疑为多窗口配置变更导致 Activity 重建），维护者决定接受现状并搁置；LiveKit 日志出现 clock skew / jitter 警告，T4 需复测；无语音配置回归已在更新生产前验证通过。
 - 决策：分屏检测搁置，不作为 T3 阻塞项；T3 仍为 🔶 待验收，核心「听到远端」与后台广播行为补验后转 ✅。
+
+### 12.26 — 2026-11-13 T3 验收通过
+
+- 类型：验收
+- 状态：✅ 已验收
+- 内容：维护者 2026-11-13 在 `nubia NX799J`（Android 16 / API 36）完成 T3 补齐验证：浏览器发布端 `t3pub#56ea` 向 `TEST01` 发布 440Hz 后，手机耳机听到持续单音；开麦状态拔耳机后麦克风图标关闭；后台 5–10 秒本地暂停，回前台提示待对齐，直接播放被拦截，seek 后恢复正常。服务器日志在后台窗口无 `[msg] pause`，且 11:06:47–11:07:12 持续 drift/forceSeek，表明房间仍保持 playing，即后台未广播 `pause`。多出的「耳机已连接」提示经 APK 字符串扫描确认不在应用内（UTF-8/UTF-16 均无），判定为系统音频路由提示，麦克风仍保持关闭，不构成 T3 问题。分屏退出房间作为维护者接受的已知偏差。
+- 证据：用户 2026-11-13 实机回报；`syncwatch` 日志 11:06:30 后无 `[msg] pause`，11:06:47–11:07:12 drift/forceSeek；APK 内无「耳机已连接」字符串。
+- 遗留：分屏退出房间（搁置）；LiveKit clock skew / jitter 待 T4；UDP/TCP 实际路径待 T4。
+- 决策：维护者确认 T3 验收通过，T3 转 ✅；下一阶段 T4 双机联调，模拟机仅作功能预演，真机对真机为验收口径。
