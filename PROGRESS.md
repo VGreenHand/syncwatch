@@ -11,9 +11,9 @@
 
 | 项 | 值 |
 |---|---|
-| 最后更新 | 2026-11-12 |
+| 最后更新 | 2026-11-13 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
-| 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；与 `fork/feat/android-voice` 同步，T1 提交 `37a6234`、T2 提交 `0c146b6` 已 push） |
+| 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；与 `fork/feat/android-voice` 同步，T1 提交 `37a6234`、T2 提交 `0c146b6`、T3 提交 `f240827` 已 push） |
 | 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2 已验收（本地 + 隔离服务器副本证据）；T3 真机部分通过（语音按钮/开关、后台提示、无耳机拒绝、LiveKit 入房并发布音频轨），待补远端接收等项；T4–T5 未开始〔流水 12.25〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
 | 最近刷新 | 流水 12.25（2026-11-12） |
@@ -465,6 +465,6 @@ docker compose version # 服务器上需要
 - 类型：验证
 - 状态：🔶 待验收
 - 内容：生产 `syncwatch` 更新到 T2 代码并注入 `LIVEKIT_*`（回滚镜像 `syncwatch:pre-t3`，源码备份 `server.bak-20261112`）；`tools/sim` 探针确认 `hello` 下发 `voiceUrl=ws://47.109.196.250:7880`、token 500 字符、TTL `6h0m0s`、仅麦克风发布/音频订阅。真机 `nubia NX799J`（Android 16 / API 36）安装 T3 APK：语音按钮出现且可开/关；切后台再回前台提示「已回到前台，拖动进度条对齐后再继续播放」；断开耳机后点麦克风提示「请先连接耳机再开麦，避免回声」。LiveKit 日志显示 `Tester#a5e6` 以 Android SDK 2.30.0 / Android 16 / NX799J 入房并发布音频轨，会话 2m4.7s，以 `CLIENT_REQUEST_LEAVE` 正常结束，证明 token 被服务端接受、麦克风发布链路打通。
-- 证据：服务器 `syncwatch` 日志 11:39:48 `[voice] token issuance enabled`，11:56–11:59 `Tester` 入房与 `seek`/`play`/`pause`；LiveKit 日志 11:59:21–12:01:25 音频轨统计与 participant closing（`sdk=ANDROID version=2.30.0 osVersion=16 deviceModel=nubia NX799J`）；用户 2026-11-12 实机回报。
+- 证据：服务器 `syncwatch` 日志 11:39:48 `[voice] token issuance enabled`，11:56–11:59 `Tester` 入房与 `seek`/`play`/`pause`；LiveKit 日志 11:59:21–12:01:25 音频轨统计与 participant closing（`sdk=ANDROID version=2.30.0 osVersion=16 deviceModel=nubia NX799J`）；用户 2026-11-12 实机回报。提交 `f240827` 于 2026-11-13 push 至 `fork/feat/android-voice`。
 - 遗留：未验证远端 440Hz 接收、开麦时拔耳机自动关麦、回前台后播放拦截、后台不广播 `pause` 的时间点对照；分屏会退出房间（疑为多窗口配置变更导致 Activity 重建），维护者决定接受现状并搁置；LiveKit 日志出现 clock skew / jitter 警告，T4 需复测；无语音配置回归已在更新生产前验证通过。
 - 决策：分屏检测搁置，不作为 T3 阻塞项；T3 仍为 🔶 待验收，核心「听到远端」与后台广播行为补验后转 ✅。
