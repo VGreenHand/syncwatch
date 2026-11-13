@@ -130,6 +130,8 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     private var voiceLifecycle = VoiceLifecycle.NONE
     private var voiceUrl = ""
     private var voiceToken = ""
+    private var hadHeadsetOutput = false
+    private var voicePausedForHeadset = false
 
     private var fileUri: Uri? = null
     private var fileName = ""
@@ -306,6 +308,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         }
         bindBackNavigation()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, mainHandler)
+        hadHeadsetOutput = hasHeadsetOutput()
         updateHomeCardWidth()
 
         handleDebugIntent()
@@ -844,6 +847,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     private fun connectVoice() {
         if (!voiceEnabled || voiceConnecting || voiceActive) return
+        if (voicePausedForHeadset) return
         if (voiceLifecycle == VoiceLifecycle.BACKGROUND_LOCAL_PAUSE) return
         voiceConnecting = true
         val client = voiceClient ?: VoiceClient(this).also { voiceClient = it }
@@ -909,10 +913,26 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     }
 
     private fun handleAudioDevicesChanged() {
-        if (micOn && !hasHeadsetOutput()) {
-            setMicEnabled(false)
-            showNotice("耳机已断开，已关闭麦克风")
+        val hasHeadset = hasHeadsetOutput()
+        if (hadHeadsetOutput && !hasHeadset) {
+            // 耳机被拔掉：外放会把远端声音直接喷到扬声器，且容易回声。
+            // 只关麦不够，整条语音先停掉，等耳机回来再重连。
+            if (micOn) setMicEnabled(false)
+            voicePausedForHeadset = true
+            if (voiceActive || voiceConnecting) {
+                voiceActive = false
+                voiceConnecting = false
+                micOn = false
+                voiceClient?.disconnect()
+                updateMicUi()
+                showNotice("耳机已断开，已暂停语音")
+            }
+        } else if (!hadHeadsetOutput && hasHeadset && voicePausedForHeadset) {
+            voicePausedForHeadset = false
+            connectVoice()
+            showNotice("耳机已连接，语音恢复中…")
         }
+        hadHeadsetOutput = hasHeadset
     }
 
     private fun disableMicOnFocusLoss() {
@@ -961,6 +981,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         voiceLifecycle = VoiceLifecycle.NONE
         voiceUrl = ""
         voiceToken = ""
+        voicePausedForHeadset = false
         playerControl.setVoiceVisible(false)
         playerControl.setMicOn(false)
     }
@@ -1675,6 +1696,8 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // 只有调试用的“带视频参数”启动才是重载片源；普通点击图标回前台不能退房。
+        if (intent?.getStringExtra("video").isNullOrBlank()) return
         if (isPlayerVisible) leaveRoom()
         handleDebugIntent()
     }
