@@ -13,7 +13,7 @@
 |---|---|
 | 最后更新 | 2026-11-13 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
-| 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；与 `fork/feat/android-voice` 同步，T1 提交 `37a6234`、T2 提交 `0c146b6`、T3 提交 `f240827` 已 push） |
+| 分支 / 基线 | `feat/android-voice`（已合并 `fork/main`；与 `fork/feat/android-voice` 同步，T1 提交 `37a6234`、T2 提交 `0c146b6`、T3 提交 `f240827`、T4 修复提交 `c5e8a77` 已 push） |
 | 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2 已验收（本地 + 隔离服务器副本证据）；T3 ✅ 已验收（单机真机通过；分屏退出房间为维护者接受的已知偏差）；T4 主流程已通过，维护者 2026-11-13 决定直接投入使用、边用边测，长时/丢包/延迟测试暂缓〔流水 12.27〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
 | 最近刷新 | 流水 12.27（2026-11-13） |
@@ -483,6 +483,6 @@ docker compose version # 服务器上需要
 - 类型：验证 / 修复
 - 状态：🚧 实现中（双向语音与主要生命周期场景已通过；固定延迟采样、丢包、网络切换及 30 分钟 soak 未完成）
 - 内容：维护者在 `nubia NX799J`（Android 16 / API 36）和电脑端手动验证：手机听到电脑发布的 440Hz；开麦无说话时电脑端听到环境底噪，轻声说话可听到人声；拔耳机后有短暂声音闪烁，随后麦克风关闭且 440Hz 完全消失，插回耳机可恢复；重复断开/恢复 3 次均成功；飞行模式断网后恢复于第 3 次重连成功；切出 App 再切回仍在房间，手动跳转后继续播放正常。排查发现 App 多个 `MainActivity` 实例造成多个语音连接互相接管并让旧连接继续播放；Android `MainActivity` 配置 `singleTask`，且 `onNewIntent` 只对带 `video` 的调试 Intent 执行片源重载。服务端生产部署同名 stale 接管：15 秒无心跳后允许接管；本地 harness 验证 2 秒同名连接仍拒绝、17 秒后允许接管。APK 构建成功并安装，维护者复测切出/切回和手动 seek 播放通过。
-- 证据：`android/build-apk.bat` 构建成功，产物 `dist/一起看-android-v0.5.2-ui.apk`；服务端容器重建后 health 返回 `{"status":"ok","rooms":1}`，启动日志确认语音 token 配置启用；用户于 2026-11-13 回报语音、耳机、飞行模式重连与切后台复测结果。
+- 证据：`android/build-apk.bat` 构建成功，产物 `dist/一起看-android-v0.5.2-ui.apk`；服务端容器重建后 health 返回 `{"status":"ok","rooms":1}`，启动日志确认语音 token 配置启用；用户于 2026-11-13 回报语音、耳机、飞行模式重连与切后台复测结果；修复提交 `c5e8a77` 已 push 至 `fork/feat/android-voice`。
 - 遗留：每次耳机断开/恢复仍有瞬态声音闪烁；T4 3 轮延迟样本、5% 丢包、Wi-Fi 到蜂窝切换、30 分钟 soak、码率/成本阈值、clock skew/jitter 与 UDP/TCP 实际路径未验证。
 - 决策：维护者 2026-11-13 决定暂不做长时间测试，直接投入使用并边用边测；T4 保持 🚧，长时/丢包/延迟项不阻塞当前试用。
