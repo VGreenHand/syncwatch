@@ -4,31 +4,41 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 rem ============================================================
-rem  一键构建 Android APK
-rem  产物：..\dist\一起看-android-v0.5.2-ui.apk
+rem  Build the Android APK (release variant, real signing key)
+rem  Output: ..\dist\<app>-android-<VER>.apk
 rem
-rem  说明：AGP 不接受含中文的项目路径，所以先把源码复制到
-rem        %TEMP%\syncwatch-android-build 再编译。
+rem  NOTE: AGP rejects non-ASCII project paths, so sources are
+rem        copied to %TEMP%\syncwatch-android-build first.
+rem
+rem  Why assembleRelease instead of assembleDebug:
+rem    a debug APK carries android:debuggable="true" and is signed
+rem    with CN=Android Debug, which makes phone security suites
+rem    (Tencent/Huawei/Xiaomi managers) flag it as risky or
+rem    virus-like. Release is non-debuggable and signed with the
+rem    key described in keystore.properties.
+rem
+rem  Keep this file ASCII-only: cmd.exe mis-parses UTF-8 text in
+rem  rem/echo lines and silently truncates the surrounding tokens.
 rem ============================================================
 
 set "VER=v0.5.2-ui"
 set "BUILD=%TEMP%\syncwatch-android-build"
 
-rem ---------- 0. 载入本机工具链路径（可选） ----------
+rem ---------- 0. local toolchain paths (optional) ----------
 if exist "%~dp0..\local-env.bat" call "%~dp0..\local-env.bat"
 
-rem ---------- 1. 查找 JDK 17 ----------
+rem ---------- 1. locate JDK 17 ----------
 if defined JAVA_HOME if exist "%JAVA_HOME%\bin\java.exe" goto java_ok
-for /d %%d in ("C:\Program Files\Java\jdk-17*") do set "JAVA_HOME=%%d"
-for /d %%d in ("C:\Program Files\Eclipse Adoptium\jdk-17*") do set "JAVA_HOME=%%d"
-for /d %%d in ("F:\android-tools\jdk17*") do set "JAVA_HOME=%%d"
+for /d %%d in ("C:\Program Files\Java\jdk-17*") do if exist "%%~d\bin\java.exe" set "JAVA_HOME=%%d"
+for /d %%d in ("C:\Program Files\Eclipse Adoptium\jdk-17*") do if exist "%%~d\bin\java.exe" set "JAVA_HOME=%%d"
+for /d %%d in ("F:\android-tools\jdk17*") do if exist "%%~d\bin\java.exe" set "JAVA_HOME=%%d"
 
 :java_ok
 if not defined JAVA_HOME goto no_java
 if not exist "%JAVA_HOME%\bin\java.exe" goto no_java
 set "PATH=%JAVA_HOME%\bin;%PATH%"
 
-rem ---------- 2. 查找 Android SDK ----------
+rem ---------- 2. locate Android SDK ----------
 if defined ANDROID_HOME if exist "%ANDROID_HOME%\platform-tools" goto sdk_ok
 if exist "F:\android-tools\sdk\platform-tools" set "ANDROID_HOME=F:\android-tools\sdk"
 if exist "%LOCALAPPDATA%\Android\Sdk\platform-tools" set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
@@ -37,26 +47,30 @@ if exist "%LOCALAPPDATA%\Android\Sdk\platform-tools" set "ANDROID_HOME=%LOCALAPP
 if not defined ANDROID_HOME goto no_sdk
 if not exist "%ANDROID_HOME%\platform-tools" goto no_sdk
 
+rem ---------- 3. signing material must exist ----------
+if not exist "keystore.properties" goto no_keystore
+if not exist "keystore\syncwatch-release.jks" goto no_keystore
+
 echo JDK    : %JAVA_HOME%
 echo SDK    : %ANDROID_HOME%
+echo KEY    : keystore\syncwatch-release.jks
 echo.
 
-rem ---------- 3. 复制到纯 ASCII 路径 ----------
-echo [1/4] 同步源码到 %BUILD%
+rem ---------- 4. copy sources to an ASCII-only path ----------
+echo [1/5] Syncing sources to %BUILD%
 if exist "%BUILD%" rmdir /s /q "%BUILD%"
 robocopy "%~dp0." "%BUILD%" /E /XD .gradle build .idea /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 (
-    echo ❌ 复制源码失败（robocopy 错误码 %errorlevel%）
+    echo [FAIL] robocopy error %errorlevel%
     exit /b 1
 )
 
-rem 确保 local.properties 存在（sdk 路径用正斜杠，Windows 上的 Gradle 也认）
 if not exist "%BUILD%\local.properties" (
     set "SDKFWD=!ANDROID_HOME:\=/!"
     echo sdk.dir=!SDKFWD!> "%BUILD%\local.properties"
 )
 
-rem ---------- 4. 选定 Gradle：local-env → PATH → 仓库自带 wrapper ----------
+rem ---------- 5. pick a Gradle: local-env -> PATH -> wrapper ----------
 if not defined GRADLE_BIN (
     where gradle >nul 2>nul
     if not errorlevel 1 set "GRADLE_BIN=gradle"
@@ -67,46 +81,74 @@ if not defined GRADLE_BIN goto no_gradle
 echo Gradle : %GRADLE_BIN%
 echo.
 
-rem ---------- 5. 编译 ----------
-echo [2/4] 编译中（首次约 2~3 分钟，会从阿里云 Maven 镜像拉依赖）...
-call "%GRADLE_BIN%" -p "%BUILD%" assembleDebug --console=plain
+rem ---------- 6. build release ----------
+echo [2/5] Building release (first run takes 2-3 min, deps from aliyun mirror)...
+call "%GRADLE_BIN%" -p "%BUILD%" assembleRelease --console=plain
 if errorlevel 1 goto fail
 
-rem ---------- 6. 回收产物 ----------
-set "APK=%BUILD%\app\build\outputs\apk\debug\app-debug.apk"
+rem ---------- 7. collect artifact ----------
+set "APK=%BUILD%\app\build\outputs\apk\release\app-release.apk"
 if not exist "%APK%" (
-    echo ❌ 编译结束但未找到 APK：%APK%
+    echo [FAIL] build finished but no APK at %APK%
     goto fail
 )
 if not exist "%~dp0..\dist" mkdir "%~dp0..\dist"
+
 set "OUT=%~dp0..\dist\一起看-android-%VER%.apk"
-echo [3/4] 拷贝 APK...
+echo [3/5] Copying APK...
 copy /y "%APK%" "%OUT%" >nul
 
-echo [4/4] 完成
+rem ---------- 8. verify the signature is not a debug key ----------
+echo [4/5] Verifying signature...
+set "APKSIGNER=%ANDROID_HOME%\build-tools\34.0.0\apksigner.bat"
+if not exist "%APKSIGNER%" (
+    for /d %%d in ("%ANDROID_HOME%\build-tools\*") do if exist "%%~d\apksigner.bat" set "APKSIGNER=%%~d\apksigner.bat"
+)
+if exist "%APKSIGNER%" (
+    call "%APKSIGNER%" verify --print-certs "%OUT%" | findstr /i "Android Debug" >nul
+    if not errorlevel 1 (
+        echo [FAIL] artifact is still signed with the debug key
+        goto fail
+    )
+    echo     OK: not a debug certificate
+) else (
+    echo     WARN: apksigner not found, skipped certificate check
+)
+
+rem ---------- 9. done ----------
+echo [5/5] Done
 for %%f in ("%OUT%") do echo.
-for %%f in ("%OUT%") do echo ✅ 产物：%%~ff  (%%~zf 字节)
+for %%f in ("%OUT%") do echo [OK] %%~ff  (%%~zf bytes)
 echo.
-echo 传到手机安装即可（Android 7.0+，允许"未知来源"）。
+echo Uninstall any previous build first: the key changed, so the new
+echo APK cannot upgrade over the old debug-signed install.
+echo Sideloading always keeps the "unknown source" prompt; the virus
+echo warning should be gone once the package is a proper release build.
 exit /b 0
 
 rem ============================================================
+:no_keystore
+echo [FAIL] Missing signing material.
+echo   Need android\keystore.properties and android\keystore\syncwatch-release.jks
+echo   (both git-ignored; carry them when switching machines).
+exit /b 1
+
 :no_java
-echo ❌ 未找到 JDK 17。请安装 JDK 17 并在 local-env.bat 里设置 JAVA_HOME。
-echo    下载：https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/x64/windows/
+echo [FAIL] JDK 17 not found. Install it and set JAVA_HOME in local-env.bat.
+echo   https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/x64/windows/
 exit /b 1
 
 :no_sdk
-echo ❌ 未找到 Android SDK。请安装 SDK 并在 local-env.bat 里设置 ANDROID_HOME。
-echo    需要组件：platform-tools、platforms;android-34、build-tools;34.0.0
+echo [FAIL] Android SDK not found. Set ANDROID_HOME in local-env.bat.
+echo   Needed: platform-tools, platforms;android-34, build-tools;34.0.0
 exit /b 1
 
 :no_gradle
-echo ❌ 未找到 Gradle。请安装 Gradle 8.7 并在 local-env.bat 里设置 GRADLE_BIN。
-echo    下载：https://mirrors.cloud.tencent.com/gradle/gradle-8.7-bin.zip
+echo [FAIL] Gradle not found. Install Gradle 8.7 and set GRADLE_BIN.
+echo   https://mirrors.cloud.tencent.com/gradle/gradle-8.7-bin.zip
 exit /b 1
 
 :fail
 echo.
-echo ❌ 构建失败，请查看上方 Gradle 输出
+echo [FAIL] Build failed, see the Gradle output above.
 exit /b 1
