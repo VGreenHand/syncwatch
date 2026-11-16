@@ -40,6 +40,9 @@ class SyncEngine(
         // 下面是纯 UI 状态通知：不改变协议，也不改变任何同步判定。
         fun onReconnecting(attempt: Int) {}
         fun onRemoteSeek(position: Double) {}
+
+        // hello 同时带 voiceUrl 与 voiceToken 时才回调；用于 fork 的语音扩展。
+        fun onVoiceConfig(voiceUrl: String, voiceToken: String) {}
     }
 
     companion object {
@@ -69,6 +72,9 @@ class SyncEngine(
     private var reconnectAttempts = 0
     private var closed = false
 
+    // 语音模式下切后台/待对齐时暂停应用远端状态与位置心跳，避免本地暂停被广播或自动追赶。
+    @Volatile private var syncSuspended = false
+
     // 本地操作抑制窗口（应用远端指令时不回发）
     @Volatile private var suppressUntil = 0L
     // 上次上报过的成员状态，避免每 5 秒重复发
@@ -79,6 +85,10 @@ class SyncEngine(
     private val hb = object : Runnable {
         override fun run() {
             if (closed) return
+            if (syncSuspended) {
+                main.postDelayed(this, HB_INTERVAL)
+                return
+            }
             send(Protocol.heartbeat(player.currentPos(), player.currentRate()))
             val st = when {
                 player.isBuffering() -> "buffering"
@@ -146,9 +156,16 @@ class SyncEngine(
                 val pos = m.optDouble("position", 0.0)
                 val rate = m.optDouble("rate", 1.0).toFloat()
                 roomState = state
-                suppress(600)
-                player.seekTo(pos)
-                if (state == "playing") player.play(pos, rate) else player.pause(pos)
+                if (!syncSuspended) {
+                    suppress(600)
+                    player.seekTo(pos)
+                    if (state == "playing") player.play(pos, rate) else player.pause(pos)
+                }
+                val voiceUrl = m.optString("voiceUrl")
+                val voiceToken = m.optString("voiceToken")
+                if (voiceUrl.isNotBlank() && voiceToken.isNotBlank()) {
+                    listener.onVoiceConfig(voiceUrl, voiceToken)
+                }
                 listener.onConnected(roomCode, m.optBoolean("created", false))
                 listener.onMembers(Protocol.parseMembers(m.optJSONArray("members")))
             }
@@ -156,6 +173,10 @@ class SyncEngine(
                 Log.i(TAG, "recv sync state=${m.optString("state")} pos=${m.optDouble("position")} op=${m.optString("operator")} local=$roomState")
                 val operator = m.optString("operator")
                 val state = m.optString("state")
+                if (syncSuspended) {
+                    roomState = state
+                    return
+                }
                 var pos = m.optDouble("position", 0.0)
                 val rate = m.optDouble("rate", 1.0).toFloat()
                 val stateChanged = roomState != state
@@ -188,6 +209,7 @@ class SyncEngine(
                 }
             }
             "forceSeek" -> {
+                if (syncSuspended) return
                 var pos = m.optDouble("position", 0.0)
                 // 纠偏也不能盲从：明显不合理的 0 视为服务端脏数据
                 if (pos.isNaN() || pos < 0 || (pos <= 0.05 && player.currentPos() > 5.0)) {
@@ -213,6 +235,7 @@ class SyncEngine(
 
     fun onLocalPlay() {
         Log.i(TAG, "onLocalPlay hello=${helloReceived.get()} suppress=${suppressed()} roomState=$roomState")
+        if (syncSuspended) return
         if (!helloReceived.get() || suppressed()) return
         if (roomState == "playing") return
         roomState = "playing"
@@ -223,6 +246,7 @@ class SyncEngine(
 
     fun onLocalPause() {
         Log.i(TAG, "onLocalPause hello=${helloReceived.get()} suppress=${suppressed()} roomState=$roomState buffering=${player.isBuffering()}")
+        if (syncSuspended) return
         if (!helloReceived.get() || suppressed()) return
         // 缓冲/卡顿不是暂停，别把全房间停住
         if (player.isBuffering()) return
@@ -247,6 +271,7 @@ class SyncEngine(
      */
     fun onLocalRateChanged(rate: Float) {
         Log.i(TAG, "onLocalRateChanged rate=$rate hello=${helloReceived.get()} roomState=$roomState")
+        if (syncSuspended) return
         if (!helloReceived.get() || suppressed()) return
         if (roomState != "playing") return
         send(Protocol.play(player.currentPos(), rate))
@@ -254,8 +279,21 @@ class SyncEngine(
     }
 
     fun onBufferingChanged(buffering: Boolean) {
+        if (syncSuspended) return
         if (!helloReceived.get()) return
         send(Protocol.memberState(if (buffering) "buffering" else if (player.isPlaying()) "playing" else "paused"))
+    }
+
+    /** 语音模式：切后台或回前台待对齐时暂停应用远端 seek/play 与位置心跳。 */
+    fun setSyncSuspended(suspended: Boolean) {
+        Log.i(TAG, "syncSuspended=$suspended")
+        syncSuspended = suspended
+    }
+
+    /** 本地暂停时只上报一次成员状态，不广播 pause。 */
+    fun notifyLocalPaused() {
+        if (!helloReceived.get()) return
+        sendMemberState("paused")
     }
 
     fun sendFileInfo(name: String, duration: Double) {
