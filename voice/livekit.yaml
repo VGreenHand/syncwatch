@@ -1,0 +1,11 @@
+port: 7880
+
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  # 服务器上由 deploy.sh 探测公网 IPv4 后写入 node_ip，避免依赖 Google STUN；
+  # 仓库内不保存真实 IP。直接使用本文件时回退到 use_external_ip。
+  use_external_ip: true
+
+logging:
+  level: info
