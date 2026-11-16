@@ -13,7 +13,7 @@
 |---|---|
 | 最后更新 | 2026-11-16 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
-| 分支 / 基线 | `feat/android-voice`（内部施工分支，与 `fork/feat/android-voice` 同步）；公开 PR 分支 `pr/android-voice`（`fork/pr/android-voice`，基于 `origin/main` `4e0ba3e`，已开 Draft PR `yangnicejin/syncwatch#1`）〔流水 12.28〕 |
+| 分支 / 基线 | `feat/android-voice`（内部施工分支；本机另有 1 个已脱敏账本提交未推送，推送被安全策略拦截，待维护者决定）；公开 PR 分支 `pr/android-voice`（`fork/pr/android-voice`，基于 `origin/main` `4e0ba3e`，已开 Draft PR `yangnicejin/syncwatch#1`）〔流水 12.28〕 |
 | 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2 已验收（本地 + 隔离服务器副本证据）；T3 ✅ 已验收（单机真机通过；分屏退出房间为维护者接受的已知偏差）；T4 未完成验收：主流程在手机 + 电脑测试页通过，缺两台 Android 真机对测、延迟采样、5% 丢包、Wi-Fi→蜂窝切换与 30 分钟 soak；维护者 2026-11-13 决定直接投入使用、边用边测〔流水 12.27〕；2026-11-16 已建立干净公开分支并开 Draft PR，维护者同意先审查、未验收项不阻塞试用〔流水 12.28〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
 | 最近刷新 | 流水 12.28（2026-11-16） |
@@ -494,4 +494,4 @@ docker compose version # 服务器上需要
 - 内容：按维护者要求新建 `pr/android-voice`，以 `origin/main` 为基线，只取语音代码与必要文档；排除 `AGENTS.md`、`.agents/`、`PROGRESS.md`、`CONTEXT.md`。公开分支按文档、服务端、Android、LiveKit 部署拆为 4 个提交，并去掉公开文档中指向内部账本的两处引用。上游 `main` 期间前进到 `4e0ba3e`（Android release 正式签名），已合并进 PR 分支；语音权限仍只新增 `RECORD_AUDIO`，`singleTask` 保留。已向 `yangnicejin/syncwatch:main` 创建 Draft PR `#1`，head 为 `VGreenHand:pr/android-voice`。
 - 证据：PR `https://github.com/yangnicejin/syncwatch/pull/1`，`draft=true`；分支 `fork/pr/android-voice` 基于 `4e0ba3e`；`git grep` 确认公开分支无真实服务器地址；25 个公开文件、变更 `+1543/-34`；合并上游后临时目录 `assembleDebug` 构建成功（`BUILD SUCCESSFUL in 34s`）；此前 release 构建在本机因缺 `android/keystore.properties`/`android/keystore/syncwatch-release.jks` 未通过，属预期的不入库签名材料。
 - 遗留：T4 未验收项不变（两台 Android 真机、延迟、丢包、网络切换、soak）；本机 PATH 无 Go，服务端与 Windows/GUI 构建未复跑；fork 旧分支历史仍含一处真实公网地址，公开 fork 可见，彻底清除需重写历史并 force push，待维护者决定。
-- 决策：维护者 2026-11-16 同意先建 PR 版本，未验收部分不阻塞试用；PR 先保持 Draft，由上游维护者审查后合并；内部施工继续在 `feat/android-voice`，公开分支手动同步。
+- 决策：维护者 2026-11-16 同意先建 PR 版本，未验收部分不阻塞试用；PR 先保持 Draft，由上游维护者审查后合并；内部施工继续在 `feat/android-voice`，公开分支手动同步。地址隐藏采用「仓库只放 `.example` 模板、真实值留在 git-ignored 的 `android/local.properties` / `server/.env` / `server/deploy.env` / `voice/.env`」；Android 构建读取 `syncwatch.server`，服务端与 LiveKit 读取环境变量。另在本地补齐 `android/local.properties`（模板值），未改动真实服务器配置。
