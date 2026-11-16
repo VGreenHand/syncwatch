@@ -28,6 +28,12 @@ android/local.properties
 android/.idea/
 android/app/release/
 
+# ===== Android 正式签名（密钥泄漏 = 别人能冒充你发版，绝不入库） =====
+android/keystore.properties
+android/keystore/
+*.jks
+*.keystore
+
 # ===== 服务端本地配置 =====
 server/.env
 server/deploy.env

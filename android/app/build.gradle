@@ -11,7 +11,7 @@ android {
         applicationId "com.syncwatch.app"
         minSdk 24
         targetSdk 34
-        versionCode 6
+        versionCode 7
         versionName "0.5.2-ui"
 
         // 默认服务器地址：写在 local.properties 的 syncwatch.server（该文件不入库）
@@ -23,9 +23,37 @@ android {
         buildConfig true
     }
 
+    // 正式签名：密钥信息写在 android/keystore.properties（不入库）
+    // 没有该文件时 release 包不签名，构建脚本会明确报错，避免再产出 debug 签名的"正式包"
+    signingConfigs {
+        release {
+            def ksFile = rootProject.file("keystore.properties")
+            if (ksFile.exists()) {
+                def ks = new Properties()
+                ksFile.withInputStream { ks.load(it) }
+                storeFile rootProject.file(ks.getProperty("storeFile"))
+                storePassword ks.getProperty("storePassword")
+                keyAlias ks.getProperty("keyAlias")
+                keyPassword ks.getProperty("keyPassword")
+                // minSdk 24 = Android 7.0，v2 已够用（AGP 在 minSdk>=24 时会忽略 v1，
+                // 反而避开 v1 的 Janus 漏洞）；v3 供密钥轮换与新系统校验。
+                // v4 只有 adb install 增量分发才需要，这里不开。
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
+            // 必须显式关掉：带 android:debuggable 的包会被手机管家类软件直接判为风险应用
+            debuggable false
+            // 当前不开混淆：Media3/OkHttp 与协议反射字段容易被误删，收益（体积/防逆向）
+            // 不值得冒运行时崩溃的风险；要开先把 proguard-rules.pro 补全并跑真机回归。
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
     compileOptions {

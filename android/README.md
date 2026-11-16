@@ -9,6 +9,39 @@ build-apk.bat        :: 产出 ..\dist\一起看-android-v0.5.2-ui.apk
 依赖 JDK 17 + Android SDK（platform 34 / build-tools 34.0.0）+ Gradle 8.7，
 路径写在仓库根目录的 `local-env.bat` 里（复制 `local-env.bat.example` 改）。
 
+## 正式签名与「安装提示风险 / 病毒」
+
+`build-apk.bat` 走 **`assembleRelease`**，用仓库外的正式密钥签名。
+**不要改回 `assembleDebug`**：debug 包带 `android:debuggable="true"`，证书主体是
+`CN=Android Debug`，手机管家 / 系统安全中心会直接判成「风险应用」甚至「病毒」。
+
+签名材料两份，都在 `.gitignore` 里，换电脑要自己带上：
+
+| 文件 | 说明 |
+|---|---|
+| `android/keystore.properties` | `storeFile` / `storePassword` / `keyAlias` / `keyPassword` |
+| `android/keystore/syncwatch-release.jks` | 2026-11-14 生成，RSA 2048，有效期 30 年 |
+
+> **丢了 jks 就再也无法给已装用户升级**（同包名必须同签名）。请离线备份两份
+> （U 盘 + 私密网盘），密码另存。
+
+彻底重建密钥（只在密钥丢失、且不在乎老用户升级时做）：
+
+```bat
+keytool -genkeypair -v -keystore keystore\syncwatch-release.jks ^
+  -alias syncwatch -keyalg RSA -keysize 2048 -validity 10950 ^
+  -dname "CN=SyncWatch, OU=Mobile, O=SyncWatch, L=Chengdu, ST=Sichuan, C=CN"
+```
+
+注意两点：
+
+- 签名换了以后，手机上已装的旧 debug 版**必须先卸载**，否则报「签名不一致，安装失败」。
+- 侧载（不走应用商店）仍会弹「未知来源」提示，这是系统行为消不掉；能消掉的是
+  「风险 / 病毒」这个判定。
+
+启动图标：`res/mipmap-anydpi-v26/` 是自适应图标（API 26+），`res/mipmap-*dpi/` 的
+PNG 由 `tools/gen-launcher-icons.ps1` 生成（API 24/25 用），改图标后跑一次脚本。
+
 ## 代码结构
 
 ```
