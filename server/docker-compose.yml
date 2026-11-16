@@ -14,6 +14,10 @@ services:
     environment:
       PORT: "8995"
       TZ: Asia/Shanghai
+      # 语音为可选能力：三项齐全才下发 voiceUrl / voiceToken，缺任一项则关闭。
+      LIVEKIT_URL: "${LIVEKIT_URL:-}"
+      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-}"
+      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-}"
     # 安全与资源限制：只读根文件系统 + 非 root + 硬上限
     read_only: true
     mem_limit: 256m
