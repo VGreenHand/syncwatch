@@ -331,6 +331,16 @@
                         android:text="自建服务器地址；分发包通常已内置，无需修改"
                         android:textColor="@color/text_hint"
                         android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/btnExportLogHome"
+                        android:layout_width="match_parent"
+                        android:layout_height="44dp"
+                        android:layout_marginTop="4dp"
+                        android:gravity="center_vertical"
+                        android:text="@string/action_export_diagnostics"
+                        android:textColor="@color/brand_light"
+                        android:textSize="13sp" />
                 </LinearLayout>
             </LinearLayout>
 
@@ -763,6 +773,16 @@
                     android:gravity="center"
                     android:textColor="@color/text_hint"
                     android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/btnExportLogDrawer"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="4dp"
+                    android:gravity="center"
+                    android:text="@string/action_export_diagnostics"
+                    android:textColor="@color/brand_light"
+                    android:textSize="12sp" />
             </LinearLayout>
         </FrameLayout>
 

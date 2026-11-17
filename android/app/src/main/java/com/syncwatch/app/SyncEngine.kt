@@ -17,7 +17,8 @@ class SyncEngine(
     private val server: String,          // host:port
     private val playerName: String,
     private val player: PlayerAdapter,
-    private val listener: Listener
+    private val listener: Listener,
+    private val diagnostics: DiagnosticLog
 ) {
     interface PlayerAdapter {
         fun play(posSec: Double, rate: Float)      // 应用远端 play
@@ -71,6 +72,7 @@ class SyncEngine(
     private var password = ""
     private var reconnectAttempts = 0
     private var closed = false
+    private var heartbeatCount = 0
 
     // 语音模式下切后台/待对齐时暂停应用远端状态与位置心跳，避免本地暂停被广播或自动追赶。
     @Volatile private var syncSuspended = false
@@ -107,10 +109,16 @@ class SyncEngine(
         password = pass
         val url = "ws://$server/ws"
         Log.i(TAG, "connect $url room=$room")
+        diagnostics.event("signaling", "connect url=$url room=${room ?: "new"}")
         val req = Request.Builder().url(url).build()
         ws = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                diagnostics.event("signaling", "ws open")
                 webSocket.send(Protocol.join(room, playerName, password))
+                diagnostics.event(
+                    "send",
+                    "join room=${room.orEmpty()} name=$playerName password=***"
+                )
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -119,10 +127,12 @@ class SyncEngine(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "ws failure: ${t.message}")
+                diagnostics.event("signaling", "ws failure: ${t.message ?: "unknown"}")
                 handleDisconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                diagnostics.event("signaling", "ws closed code=$code reason=$reason")
                 handleDisconnect()
             }
         })
@@ -149,6 +159,13 @@ class SyncEngine(
         when (m.optString("type")) {
             "hello" -> {
                 Log.i(TAG, "recv hello room=${m.optString("room")} state=${m.optString("state")} pos=${m.optDouble("position")}")
+                diagnostics.event(
+                    "signaling",
+                    "recv hello room=${m.optString("room")} created=${m.optBoolean("created", false)} " +
+                        "state=${m.optString("state")} pos=${m.optDouble("position")} " +
+                        "voiceUrl=${m.optString("voiceUrl").ifBlank { "-" }} " +
+                        "voiceTokenLen=${m.optString("voiceToken").length}"
+                )
                 reconnectAttempts = 0
                 roomCode = m.optString("room")
                 helloReceived.set(true)
@@ -171,6 +188,11 @@ class SyncEngine(
             }
             "sync" -> {
                 Log.i(TAG, "recv sync state=${m.optString("state")} pos=${m.optDouble("position")} op=${m.optString("operator")} local=$roomState")
+                diagnostics.event(
+                    "signaling",
+                    "recv sync state=${m.optString("state")} pos=${m.optDouble("position")} " +
+                        "op=${m.optString("operator")} local=$roomState"
+                )
                 val operator = m.optString("operator")
                 val state = m.optString("state")
                 if (syncSuspended) {
@@ -211,6 +233,7 @@ class SyncEngine(
             "forceSeek" -> {
                 if (syncSuspended) return
                 var pos = m.optDouble("position", 0.0)
+                diagnostics.event("signaling", "recv forceSeek pos=$pos")
                 // 纠偏也不能盲从：明显不合理的 0 视为服务端脏数据
                 if (pos.isNaN() || pos < 0 || (pos <= 0.05 && player.currentPos() > 5.0)) {
                     return
@@ -221,13 +244,28 @@ class SyncEngine(
                 listener.onNotice("服务器纠偏 → ${fmt(pos)}")
             }
             "members" -> listener.onMembers(Protocol.parseMembers(m.optJSONArray("members")))
-            "join" -> listener.onNotice("${m.optString("name")} 加入了房间")
-            "leave" -> listener.onNotice("${m.optString("name")} 离开了房间")
+            "join" -> {
+                val name = m.optString("name")
+                diagnostics.event("signaling", "recv join name=$name")
+                listener.onNotice("$name 加入了房间")
+            }
+            "leave" -> {
+                val name = m.optString("name")
+                diagnostics.event("signaling", "recv leave name=$name")
+                listener.onNotice("$name 离开了房间")
+            }
             "joinError" -> {
+                diagnostics.event(
+                    "signaling",
+                    "recv joinError: ${m.optString("error", "加入失败")}"
+                )
                 listener.onJoinError(m.optString("error", "加入失败"))
                 close()
             }
-            "error" -> listener.onNotice("服务器: ${m.optString("error")}")
+            "error" -> {
+                diagnostics.event("signaling", "recv error: ${m.optString("error")}")
+                listener.onNotice("服务器: ${m.optString("error")}")
+            }
         }
     }
 
@@ -235,6 +273,11 @@ class SyncEngine(
 
     fun onLocalPlay() {
         Log.i(TAG, "onLocalPlay hello=${helloReceived.get()} suppress=${suppressed()} roomState=$roomState")
+        diagnostics.event(
+            "playback",
+            "local play pos=${player.currentPos()} rate=${player.currentRate()} " +
+                "hello=${helloReceived.get()} suppress=${suppressed()} roomState=$roomState"
+        )
         if (syncSuspended) return
         if (!helloReceived.get() || suppressed()) return
         if (roomState == "playing") return
@@ -246,6 +289,11 @@ class SyncEngine(
 
     fun onLocalPause() {
         Log.i(TAG, "onLocalPause hello=${helloReceived.get()} suppress=${suppressed()} roomState=$roomState buffering=${player.isBuffering()}")
+        diagnostics.event(
+            "playback",
+            "local pause pos=${player.currentPos()} buffering=${player.isBuffering()} " +
+                "hello=${helloReceived.get()} suppress=${suppressed()} roomState=$roomState"
+        )
         if (syncSuspended) return
         if (!helloReceived.get() || suppressed()) return
         // 缓冲/卡顿不是暂停，别把全房间停住
@@ -259,6 +307,10 @@ class SyncEngine(
 
     fun onLocalSeek(pos: Double) {
         Log.i(TAG, "onLocalSeek pos=$pos hello=${helloReceived.get()} suppress=${suppressed()}")
+        diagnostics.event(
+            "playback",
+            "local seek pos=$pos hello=${helloReceived.get()} suppress=${suppressed()}"
+        )
         if (!helloReceived.get() || suppressed()) return
         send(Protocol.seek(pos))
         listener.onNotice("你跳转到了 ${fmt(pos)}")
@@ -271,6 +323,10 @@ class SyncEngine(
      */
     fun onLocalRateChanged(rate: Float) {
         Log.i(TAG, "onLocalRateChanged rate=$rate hello=${helloReceived.get()} roomState=$roomState")
+        diagnostics.event(
+            "playback",
+            "local rate=$rate hello=${helloReceived.get()} suppress=${suppressed()} roomState=$roomState"
+        )
         if (syncSuspended) return
         if (!helloReceived.get() || suppressed()) return
         if (roomState != "playing") return
@@ -287,6 +343,7 @@ class SyncEngine(
     /** 语音模式：切后台或回前台待对齐时暂停应用远端 seek/play 与位置心跳。 */
     fun setSyncSuspended(suspended: Boolean) {
         Log.i(TAG, "syncSuspended=$suspended")
+        diagnostics.event("playback", "sync suspended=$suspended")
         syncSuspended = suspended
     }
 
@@ -308,8 +365,31 @@ class SyncEngine(
     }
 
     fun send(text: String) {
-        Log.i(TAG, "send ${text.take(140)}")
+        val safe = safeForLog(text)
+        if (safe.isNotBlank()) {
+            Log.i(TAG, "send $safe")
+            diagnostics.event("send", safe)
+        }
         ws?.send(text)
+    }
+
+    private fun safeForLog(text: String): String {
+        val message = try {
+            JSONObject(text)
+        } catch (_: Exception) {
+            return text.take(180)
+        }
+        if (message.optString("type") == "join") {
+            return "join room=${message.optString("room")} " +
+                "name=${message.optString("name")} password=***"
+        }
+        if (message.optString("type") == "heartbeat") {
+            heartbeatCount++
+            if (heartbeatCount % 6 != 0) return ""
+            return "heartbeat pos=${message.optDouble("position")} " +
+                "rate=${message.optDouble("rate")} (30s summary)"
+        }
+        return text.take(180)
     }
 
     private fun fmt(d: Double) = String.format("%d:%02d", (d / 60).toInt(), (d % 60).toInt())
@@ -317,6 +397,7 @@ class SyncEngine(
     fun close() {
         closed = true
         main.removeCallbacks(hb)
+        diagnostics.event("signaling", "close")
         send(Protocol.leave())
         ws?.close(1000, "bye")
         client.dispatcher.executorService.shutdown()

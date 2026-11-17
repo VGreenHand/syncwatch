@@ -41,6 +41,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -78,6 +79,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     private lateinit var advancedToggle: View
     private lateinit var advancedFields: View
     private lateinit var advancedChevron: ImageView
+    private lateinit var btnExportLogHome: TextView
     private lateinit var fileCard: View
     private lateinit var fileText: TextView
     private lateinit var fileMeta: TextView
@@ -110,6 +112,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     private lateinit var drawerSubtitle: TextView
     private lateinit var drawerMembersList: LinearLayout
     private lateinit var drawerServerText: TextView
+    private lateinit var btnExportLogDrawer: TextView
     private lateinit var btnCloseDrawer: ImageButton
     private lateinit var connectingOverlay: View
     private lateinit var connectingText: TextView
@@ -152,6 +155,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     private var members: List<MemberInfo> = emptyList()
     private var brightnessBeforePlayer = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
     private var brightnessCaptured = false
+    private lateinit var diagnostics: DiagnosticLog
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val cfg by lazy { getSharedPreferences("cfg", Context.MODE_PRIVATE) }
@@ -276,6 +280,12 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         window.navigationBarColor = getColor(R.color.bg_page)
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
 
+        diagnostics = DiagnosticLog(this)
+        diagnostics.event(
+            "app",
+            "start version=${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) " +
+                "debug=${BuildConfig.DEBUG}"
+        )
         bindViews()
         setupListeners()
 
@@ -330,6 +340,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         advancedToggle = findViewById(R.id.advancedToggle)
         advancedFields = findViewById(R.id.advancedFields)
         advancedChevron = findViewById(R.id.advancedChevron)
+        btnExportLogHome = findViewById(R.id.btnExportLogHome)
         fileCard = findViewById(R.id.fileCard)
         fileText = findViewById(R.id.fileText)
         fileMeta = findViewById(R.id.fileMeta)
@@ -362,6 +373,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         drawerSubtitle = findViewById(R.id.drawerSubtitle)
         drawerMembersList = findViewById(R.id.drawerMembersList)
         drawerServerText = findViewById(R.id.drawerServerText)
+        btnExportLogDrawer = findViewById(R.id.btnExportLogDrawer)
         btnCloseDrawer = findViewById(R.id.btnCloseDrawer)
         connectingOverlay = findViewById(R.id.connectingOverlay)
         connectingText = findViewById(R.id.connectingText)
@@ -378,6 +390,8 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         btnJoin.setOnClickListener { tryJoin() }
         btnTogglePassword.setOnClickListener { togglePasswordField() }
         advancedToggle.setOnClickListener { toggleAdvancedSettings() }
+        btnExportLogHome.setOnClickListener { exportDiagnostics() }
+        btnExportLogDrawer.setOnClickListener { exportDiagnostics() }
         btnPortraitFullscreen.setOnClickListener { setFullscreen(true) }
         btnLeaveRoom.setOnClickListener { confirmLeaveRoom() }
         btnUnlock.setOnClickListener { setLocked(false) }
@@ -498,6 +512,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
             .putString("name", name)
             .putString("room", room)
             .apply()
+        diagnostics.setContext(room = room, nickname = name, server = server)
 
         currentServer = server
         currentRoom = ""
@@ -523,7 +538,8 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         applyPlayerLayout()
         startProgressTicker()
 
-        engine = SyncEngine(server, name, this, this).also {
+        diagnostics.setContext(room = room, nickname = name, server = server)
+        engine = SyncEngine(server, name, this, this, diagnostics).also {
             it.connect(if (isJoinMode) room.ifBlank { null } else null, etPass.text.toString())
         }
     }
@@ -588,6 +604,10 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     @SuppressLint("UnsafeOptInUsageError")
     private fun setupPlayer(uri: Uri) {
         releasePlayer()
+        diagnostics.event(
+            "player",
+            "prepare name=${fileName.ifBlank { "-" }} size=$fileSize uri=${uri.scheme ?: "-"}"
+        )
         if (!brightnessCaptured) {
             brightnessBeforePlayer = window.attributes.screenBrightness
             brightnessCaptured = true
@@ -607,6 +627,10 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     private fun releasePlayer() {
         if (playerInitialized) {
+            diagnostics.event(
+                "player",
+                "release pos=${currentPos()} duration=${player.duration.coerceAtLeast(0L) / 1000.0}"
+            )
             runCatching { playerView.player = null }
             runCatching { player.release() }
         }
@@ -632,6 +656,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
             if (!playerInitialized) return
             val buffering = playbackState == Player.STATE_BUFFERING
             if (buffering != lastBuffering) {
+                diagnostics.event("playback", "buffering=$buffering")
                 lastBuffering = buffering
                 bufferingIndicator.visibility = if (buffering && isPlayerVisible) View.VISIBLE else View.GONE
                 engine?.onBufferingChanged(buffering)
@@ -652,6 +677,11 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
             reason: Int
         ) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                diagnostics.event(
+                    "playback",
+                    "position discontinuity seek ${oldPosition.positionMs / 1000.0} -> " +
+                        "${newPosition.positionMs / 1000.0}"
+                )
                 engine?.onLocalSeek(newPosition.positionMs / 1000.0)
                 if (playerInitialized) {
                     playerControl.updateProgress(
@@ -668,6 +698,10 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
         override fun onPlayerError(error: PlaybackException) {
             if (!isPlayerVisible) return
+            diagnostics.event(
+                "playback",
+                "player error ${error.errorCodeName}: ${error.message ?: "unknown"}"
+            )
             bufferingIndicator.visibility = View.GONE
             playerControl.setPlaybackState(false, false, player.duration.coerceAtLeast(0L))
             showBlocker(
@@ -724,6 +758,11 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     override fun onConnected(room: String, created: Boolean) {
         val reconnected = hasJoinedRoom && currentRoom == room
         currentRoom = room
+        diagnostics.setContext(room = room)
+        diagnostics.event(
+            "session",
+            "connected room=$room created=$created reconnected=$reconnected"
+        )
         hasJoinedRoom = true
         connectingOverlay.visibility = View.GONE
         updateRoomUi()
@@ -760,16 +799,19 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     }
 
     override fun onJoinError(msg: String) {
+        diagnostics.event("session", "join error: $msg")
         leaveRoom()
         showBlocker("没有加入房间", msg)
     }
 
     override fun onDisconnected() {
+        diagnostics.event("signaling", "disconnected")
         setConnectionStatus("重连中", R.color.warning)
         if (!hasJoinedRoom) connectingText.text = "连接中断，正在重试…"
     }
 
     override fun onReconnecting(attempt: Int) {
+        diagnostics.event("signaling", "reconnecting attempt=$attempt")
         setConnectionStatus("重连中 $attempt", R.color.warning)
         if (!hasJoinedRoom) connectingText.text = "连接中断，正在进行第 $attempt 次重连…"
     }
@@ -850,7 +892,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         if (voicePausedForHeadset) return
         if (voiceLifecycle == VoiceLifecycle.BACKGROUND_LOCAL_PAUSE) return
         voiceConnecting = true
-        val client = voiceClient ?: VoiceClient(this).also { voiceClient = it }
+        val client = voiceClient ?: VoiceClient(this, diagnostics).also { voiceClient = it }
         client.connect(voiceUrl, voiceToken, voiceListener)
     }
 
@@ -917,6 +959,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         if (hadHeadsetOutput && !hasHeadset) {
             // 耳机被拔掉：外放会把远端声音直接喷到扬声器，且容易回声。
             // 只关麦不够，整条语音先停掉，等耳机回来再重连。
+            diagnostics.event("audio", "audio output removed; headset=false")
             if (micOn) setMicEnabled(false)
             voicePausedForHeadset = true
             if (voiceActive || voiceConnecting) {
@@ -928,6 +971,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
                 showNotice("耳机已断开，已暂停语音")
             }
         } else if (!hadHeadsetOutput && hasHeadset && voicePausedForHeadset) {
+            diagnostics.event("audio", "audio output restored; headset=true")
             voicePausedForHeadset = false
             connectVoice()
             showNotice("耳机已连接，语音恢复中…")
@@ -937,6 +981,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     private fun disableMicOnFocusLoss() {
         if (voiceEnabled && micOn) {
+            diagnostics.event("audio", "focus loss; microphone disabled")
             setMicEnabled(false)
             showNotice("失去前台焦点，已关闭麦克风")
         }
@@ -944,6 +989,10 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     private fun enterBackgroundLocalPause() {
         if (voiceLifecycle == VoiceLifecycle.BACKGROUND_LOCAL_PAUSE) return
+        diagnostics.event(
+            "lifecycle",
+            "enter background local pause; voice=${voiceEnabled} playing=${isPlaying()}"
+        )
         voiceLifecycle = VoiceLifecycle.BACKGROUND_LOCAL_PAUSE
         engine?.setSyncSuspended(true)
         engine?.notifyLocalPaused()
@@ -957,6 +1006,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     private fun enterForegroundPendingAlign() {
         if (voiceLifecycle != VoiceLifecycle.BACKGROUND_LOCAL_PAUSE) return
+        diagnostics.event("lifecycle", "enter foreground pending align")
         voiceLifecycle = VoiceLifecycle.FOREGROUND_PENDING_ALIGN
         engine?.setSyncSuspended(true)
         if (playerInitialized && player.playWhenReady) player.pause()
@@ -966,6 +1016,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     private fun alignFromPending() {
         if (voiceLifecycle != VoiceLifecycle.FOREGROUND_PENDING_ALIGN) return
+        diagnostics.event("lifecycle", "foreground aligned")
         voiceLifecycle = VoiceLifecycle.NORMAL
         engine?.setSyncSuspended(false)
         showNotice("已对齐，可以继续播放")
@@ -1565,12 +1616,51 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
         )
     }
 
+    private fun exportDiagnostics() {
+        val meta = DiagnosticLog.ExportMeta(
+            room = currentRoom,
+            nickname = etName.text.toString().trim(),
+            server = currentServer.ifBlank { normalizeServer(etServer.text.toString()) }
+        )
+        val result = diagnostics.export(meta)
+        result.onSuccess { file ->
+            diagnostics.event("export", "exported ${file.name} bytes=${file.length()}")
+            val uri = FileProvider.getUriForFile(
+                this,
+                "$packageName.fileprovider",
+                file
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "SyncWatch 诊断日志")
+                clipData = ClipData.newRawUri("diagnostics", uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                startActivity(Intent.createChooser(intent, "发送诊断日志"))
+                showNotice("诊断日志已生成，请选择发送方式")
+            } catch (e: Exception) {
+                diagnostics.event("export", "share failed: ${e.message ?: "unknown"}")
+                showBlocker("无法打开分享面板", "日志已保留在本机，请稍后重试。\n${e.message ?: ""}".trim())
+            }
+        }.onFailure { e ->
+            diagnostics.event("export", "failed: ${e.message ?: "unknown"}")
+            showBlocker("导出诊断日志失败", e.message ?: "未知错误")
+        }
+    }
+
     private fun leaveRoom(restoreOrientation: Boolean = true) {
         if (!isPlayerVisible) return
+        diagnostics.event(
+            "session",
+            "leave room=$currentRoom; voice=${voiceEnabled} mic=$micOn"
+        )
         stopProgressTicker()
         closeMembersDrawer()
         gestureController?.cancelCurrentGesture()
         playerControl.setPanelOpen(false)
+        diagnostics.setContext(room = "")
         playerControl.setLocked(false)
         playerControl.resetTransientUi()
         lockOverlay.visibility = View.GONE
@@ -1654,6 +1744,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     private fun showNotice(text: String) {
         if (text.isBlank()) return
+        diagnostics.event("notice", text)
         mainHandler.removeCallbacks(noticeHide)
         noticePill.animate().cancel()
         noticePill.text = text
@@ -1720,6 +1811,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     override fun onStart() {
         super.onStart()
+        diagnostics.event("lifecycle", "onStart; multiWindow=$isInMultiWindowMode")
         if (isPlayerVisible && voiceLifecycle == VoiceLifecycle.BACKGROUND_LOCAL_PAUSE) {
             enterForegroundPendingAlign()
         }
@@ -1727,6 +1819,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     override fun onPause() {
         super.onPause()
+        diagnostics.event("lifecycle", "onPause; multiWindow=$isInMultiWindowMode")
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && isPlayerVisible && isInMultiWindowMode) {
             disableMicOnFocusLoss()
         }
@@ -1734,11 +1827,17 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
 
     override fun onTopResumedActivityChanged(isTopResumed: Boolean) {
         super.onTopResumedActivityChanged(isTopResumed)
+        diagnostics.event("lifecycle", "onTopResumedActivityChanged=$isTopResumed")
         if (!isTopResumed) disableMicOnFocusLoss()
     }
 
     override fun onStop() {
         super.onStop()
+        diagnostics.event(
+            "lifecycle",
+            "onStop; multiWindow=$isInMultiWindowMode voice=$voiceEnabled " +
+                "lifecycle=$voiceLifecycle"
+        )
         if (!isPlayerVisible) return
         if (voiceEnabled) {
             enterBackgroundLocalPause()
@@ -1748,6 +1847,7 @@ class MainActivity : AppCompatActivity(), SyncEngine.Listener, SyncEngine.Player
     }
 
     override fun onDestroy() {
+        diagnostics.event("app", "destroy")
         mainHandler.removeCallbacksAndMessages(null)
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         resetVoiceState()

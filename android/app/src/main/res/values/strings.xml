@@ -21,4 +21,5 @@
     <string name="members">成员</string>
     <string name="fullscreen">全屏</string>
     <string name="speed">倍速</string>
+    <string name="action_export_diagnostics">导出诊断日志</string>
 </resources>

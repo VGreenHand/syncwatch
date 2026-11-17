@@ -11,16 +11,16 @@
 
 | 项 | 值 |
 |---|---|
-| 最后更新 | 2026-11-16 |
+| 最后更新 | 2026-11-17 |
 | 工作线 | v0.6 Android 内置语音（`feat/android-voice`，fork 扩展） |
 | 分支 / 基线 | `feat/android-voice`（内部施工分支，已脱敏并 force-push 至 `fork/feat/android-voice`，HEAD 与远端一致）；公开 PR 分支 `pr/android-voice`（`fork/pr/android-voice`，基于 `origin/main` `4e0ba3e`，已开 Draft PR `yangnicejin/syncwatch#1`）〔流水 12.28〕 |
-| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2 已验收（本地 + 隔离服务器副本证据）；T3 ✅ 已验收（单机真机通过；分屏退出房间为维护者接受的已知偏差）；T4 未完成验收：主流程在手机 + 电脑测试页通过，缺两台 Android 真机对测、延迟采样、5% 丢包、Wi-Fi→蜂窝切换与 30 分钟 soak；维护者 2026-11-13 决定直接投入使用、边用边测〔流水 12.27〕；2026-11-16 已建立干净公开分支并开 Draft PR，维护者同意先审查、未验收项不阻塞试用〔流水 12.28〕 |
+| 状态 | fork 语音扩展先行；ADR 仍 `Proposed`（仅指上游决策未批准）；fork 实施按既有授权先行；12.1–12.15 已验收；T1 已验收（部署/公网/音频/停服通过，告警按维护者决定豁免）；T2 已验收（本地 + 隔离服务器副本证据）；T3 ✅ 已验收（单机真机通过；分屏退出房间为维护者接受的已知偏差）；T4 未完成验收：主流程在手机 + 电脑测试页通过，缺两台 Android 真机对测、延迟采样、5% 丢包、Wi-Fi→蜂窝切换与 30 分钟 soak；维护者 2026-11-13 决定直接投入使用、边用边测〔流水 12.27〕；2026-11-16 已建立干净公开分支并开 Draft PR，维护者同意先审查、未验收项不阻塞试用〔流水 12.28〕；诊断日志已完成代码与模拟器导出验证，待真机双机使用验证〔流水 12.30〕 |
 | 当前占用 | Windows 开发机 `D:\Study\Project\syncwatch` |
-| 最近刷新 | 流水 12.28（2026-11-16） |
-| 下一步 | 维护者审查 Draft PR `yangnicejin/syncwatch#1`；内部继续线上试用并收集断连、重连与同步偏差；按需补 30 分钟 soak、5% 丢包与延迟采样〔流水 12.28〕 |
+| 最近刷新 | 流水 12.30（2026-11-17） |
+| 下一步 | 真机双机试用并导出主测手机日志；随后维护者审查 Draft PR `yangnicejin/syncwatch#1`，继续收集断连、重连与同步偏差〔流水 12.30〕 |
 | 开放决策 | 见 §9 待定表（TLS、SDK 版本、流量阈值、机型清单等；LiveKit 服务端版本与网络已定） |
-| 已验证 | 源码通读（v0.5.1）、开工前设计口径与开发计划已入库、T1–T4 验收口径已具体化、`voice/` 配置与自包含 `deploy.sh` 已就绪；服务器已部署 `syncwatch-livekit`，镜像 `v1.13.11`，三端口监听，本机与公网 HTTP 200，`node_ip` 生效；T1 音频验收通过；停 LiveKit 后 `syncwatch` 仍 healthy、8995 仍监听，恢复后自检全 PASS；维护者决定暂不设置临时告警并验收通过 T1；T1 收尾与账本提交已 push 至 `fork/feat/android-voice`；T2 服务端、`tools/sim`、`tools/ctl` 构建通过，本地 `hello` 的 token 签名/TTL/权限矩阵、缺配置关闭路径、并发入房与 `sync` 广播均通过；T2 隔离服务器副本使用真实 `LIVEKIT_*`，容器健康、token `sig=ok`、TTL `6h0m0s`、权限矩阵与 A/B `sync` 广播通过，生产 `syncwatch` 未受影响的 8995 保持 healthy；T3.0 固定 LiveKit Android SDK `2.30.0`，APK 构建通过（minSdk 24 / compileSdk 34 / JDK 17 / Gradle 8.7），`testDebugUnitTest` 与 `lintDebug` 通过，合并后权限仅新增 `RECORD_AUDIO`（另有 SDK 提供的 `MODIFY_AUDIO_SETTINGS` 与旧蓝牙权限）；2026-11-12 真机 `nubia NX799J`（Android 16 / API 36）验证：语音按钮出现且可开关、切后台回前台提示正常、无耳机时拒绝开麦；LiveKit 日志确认 `Tester` 以 Android SDK 2.30.0 入房并发布音频轨，会话 2m4s，token 被服务端接受；2026-11-13 真机补齐：440Hz 远端接收通过、开麦时拔耳机自动关麦、后台本地暂停且服务器无 `pause` 广播、回前台播放被拦截、seek 后恢复；T4 手动联调：电脑端发布 440Hz，手机与电脑双向语音可听；NX799J/Android 16 拔插耳机 3 次均自动断开/恢复（每次有短暂声音闪烁，拔出后 440Hz 完全消失）；飞行模式断网后恢复于第 3 次重连成功；切出/切回仍在房间，手动跳转后继续播放通过；安装含 `singleTask` 与普通启动 Intent 修复的 APK 后验收通过；服务端同名连接 15 秒 stale 接管已部署，断网恢复重试次数由 10+ 降至 3；2026-11-16 干净分支 `pr/android-voice` 从 `origin/main` 合并 `4e0ba3e` 后 `assembleDebug` 通过，公开分支扫描无真实服务器地址与内部账本文件〔流水 12.28〕 |
-| 未验证 | 两台 Android 真机对测、T4 3 轮延迟样本及 p50/p95、5% 丢包、Wi-Fi→蜂窝切换、30 分钟 soak、音频码率/成本阈值、LiveKit clock skew/jitter、UDP 7882 与 TCP 7881 实际选中路径仍待验证；停服窗口内未用客户端实测播放同步；分屏检测会退出房间（维护者已接受并搁置）；Windows 控制台/GUI/Android 旧客户端未实际入房（仅源码与 `tools/ctl` 兼容验证）；签发失败路径未强制触发；干净分支 release APK 未验证（本机缺 `android/keystore.properties` 与 `android/keystore/`，仅完成 `assembleDebug`）；Windows/GUI 与服务端构建未在本机复跑（当前 PATH 无 Go）〔流水 12.28〕 |
+| 已验证 | 源码通读（v0.5.1）、开工前设计口径与开发计划已入库、T1–T4 验收口径已具体化、`voice/` 配置与自包含 `deploy.sh` 已就绪；服务器已部署 `syncwatch-livekit`，镜像 `v1.13.11`，三端口监听，本机与公网 HTTP 200，`node_ip` 生效；T1 音频验收通过；停 LiveKit 后 `syncwatch` 仍 healthy、8995 仍监听，恢复后自检全 PASS；维护者决定暂不设置临时告警并验收通过 T1；T1 收尾与账本提交已 push 至 `fork/feat/android-voice`；T2 服务端、`tools/sim`、`tools/ctl` 构建通过，本地 `hello` 的 token 签名/TTL/权限矩阵、缺配置关闭路径、并发入房与 `sync` 广播均通过；T2 隔离服务器副本使用真实 `LIVEKIT_*`，容器健康、token `sig=ok`、TTL `6h0m0s`、权限矩阵与 A/B `sync` 广播通过，生产 `syncwatch` 未受影响的 8995 保持 healthy；T3.0 固定 LiveKit Android SDK `2.30.0`，APK 构建通过（minSdk 24 / compileSdk 34 / JDK 17 / Gradle 8.7），`testDebugUnitTest` 与 `lintDebug` 通过，合并后权限仅新增 `RECORD_AUDIO`（另有 SDK 提供的 `MODIFY_AUDIO_SETTINGS` 与旧蓝牙权限）；2026-11-12 真机 `nubia NX799J`（Android 16 / API 36）验证：语音按钮出现且可开关、切后台回前台提示正常、无耳机时拒绝开麦；LiveKit 日志确认 `Tester` 以 Android SDK 2.30.0 入房并发布音频轨，会话 2m4s，token 被服务端接受；2026-11-13 真机补齐：440Hz 远端接收通过、开麦时拔耳机自动关麦、后台本地暂停且服务器无 `pause` 广播、回前台播放被拦截、seek 后恢复；T4 手动联调：电脑端发布 440Hz，手机与电脑双向语音可听；NX799J/Android 16 拔插耳机 3 次均自动断开/恢复（每次有短暂声音闪烁，拔出后 440Hz 完全消失）；飞行模式断网后恢复于第 3 次重连成功；切出/切回仍在房间，手动跳转后继续播放通过；安装含 `singleTask` 与普通启动 Intent 修复的 APK 后验收通过；服务端同名连接 15 秒 stale 接管已部署，断网恢复重试次数由 10+ 降至 3；2026-11-16 干净分支 `pr/android-voice` 从 `origin/main` 合并 `4e0ba3e` 后 `assembleDebug` 通过，公开分支扫描无真实服务器地址与内部账本文件〔流水 12.28〕；2026-11-17 诊断日志完成：`assembleDebug testDebugUnitTest` 通过（`BUILD SUCCESSFUL in 15s`），模拟器 `f04_test` 实测启动日志生成、按天文件写入、首页导出生成 `570` 字节 `.txt` 并拉起系统分享面板；临时本机 WebSocket 服务实测 `join room=ABC123 name=Tester password=***`、`voiceTokenLen=21`，`logcat` 中无密码或 token 正文〔流水 12.30〕 |
+| 未验证 | 两台 Android 真机对测、T4 3 轮延迟样本及 p50/p95、5% 丢包、Wi-Fi→蜂窝切换、30 分钟 soak、音频码率/成本阈值、LiveKit clock skew/jitter、UDP 7882 与 TCP 7881 实际选中路径仍待验证；停服窗口内未用客户端实测播放同步；分屏检测会退出房间（维护者已接受并搁置）；Windows 控制台/GUI/Android 旧客户端未实际入房（仅源码与 `tools/ctl` 兼容验证）；签发失败路径未强制触发；干净分支 release APK 未验证（本机缺 `android/keystore.properties` 与 `android/keystore/`，仅完成 `assembleDebug`）；Windows/GUI 与服务端构建未在本机复跑（当前 PATH 无 Go）；诊断日志的成员抽屉导出、7 天/2 MB 清理与真机双机转发未验证〔流水 12.30〕 |
 | 导航 | 本表 → ADR → `docs/02` → §7 当前任务行；历史见 §12 |
 
 ## 1. 目标
@@ -495,3 +495,21 @@ docker compose version # 服务器上需要
 - 证据：PR `https://github.com/yangnicejin/syncwatch/pull/1`，`draft=true`；分支 `fork/pr/android-voice` 基于 `4e0ba3e`；`git grep` 确认公开分支无真实服务器地址；25 个公开文件、变更 `+1543/-34`；合并上游后临时目录 `assembleDebug` 构建成功（`BUILD SUCCESSFUL in 34s`）；此前 release 构建在本机因缺 `android/keystore.properties`/`android/keystore/syncwatch-release.jks` 未通过，属预期的不入库签名材料。
 - 遗留：T4 未验收项不变（两台 Android 真机、延迟、丢包、网络切换、soak）；本机 PATH 无 Go，服务端与 Windows/GUI 构建未复跑。
 - 决策：维护者 2026-11-16 同意先建 PR 版本，未验收部分不阻塞试用；PR 先保持 Draft，由上游维护者审查后合并；内部施工继续在 `feat/android-voice`，公开分支手动同步。地址隐藏采用「仓库只放 `.example` 模板、真实值留在 git-ignored 的 `android/local.properties` / `server/.env` / `server/deploy.env` / `voice/.env`」；Android 构建读取 `syncwatch.server`，服务端与 LiveKit 读取环境变量。另在本地补齐 `android/local.properties`（模板值），未改动真实服务器配置。维护者当天确认只有本机在推送，授权重写 `feat/android-voice` 历史；已把旧账本中的公网地址替换为 `<公网IP>`，备份分支 `backup/feat-android-voice-pre-scrub` 保留在本机，force-push 后远端历史扫描 0 命中。
+
+### 12.29 — 2026-11-17 诊断日志设计确认
+
+- 类型：设计 / 规划
+- 状态：🚧 设计已确认，尚未实现
+- 内容：为两台真机在物理距离下排障，确认 Android 诊断日志方案：自动记录 + 显式导出，release 与 debug 均可用；按天写入应用私有目录，保留 7 天、总量 2 MB；成员抽屉与首页高级设置各提供「导出诊断日志」，导出单个 `.txt` 并通过系统分享面板转发，新增组件仅 `FileProvider`。记录连接、入房、播放控制、前后台与分屏、语音重连、远端音频订阅、麦克风与耳机、权限失败、`forceSeek` 与异常；心跳每 30 秒一条摘要。`join` 保留事件但密码替换为 `***`，token 只记录长度；不记录 token 正文、密码、API Key/Secret 或设备唯一标识。房间在最后一人离开约 15 分钟后由服务端回收，日志保留独立于房间；退出房间后继续记录应用级事件，语音与播放连接按既有行为断开。另记录 `ROOM_IDLE_TTL` 常量当前未被使用，属相邻发现，本次不改。
+- 证据：`docs/branches/android-voice/05-android-voice.md` 新增「诊断日志」一节（规划与验收口径）；`server/main.go` 中 `EMPTY_ROOM_TTL = 15 * time.Minute`、`reaper` 每分钟回收；`ROOM_IDLE_TTL` 无引用。当前无实现代码、无构建产物。
+- 遗留：实现、构建、模拟器导出验证与真机验证均未开始；`FileProvider`、日志文件格式与脱敏实现细节待编码。
+- 决策：维护者 2026-11-17 逐项确认日志设计；先完成文档记录，再按此实现；双机测试不强制 30 分钟，但应尽可能延长，异常时另一台手机补导出。
+
+### 12.30 — 2026-11-17 Android 诊断日志实现
+
+- 类型：Android / 诊断
+- 状态：🔶 待验收（模拟器验证通过，真机双机待验证）
+- 内容：新增 `DiagnosticLog`，事件按天写入应用私有 `files/diagnostics/`，保留 7 天、总量上限 2 MB、单文件超过 512 KB 自动分卷；应用启动即清理过期文件。接入信令连接/重连/`hello`/`sync`/`forceSeek`/`join`/`leave`、播放与暂停/seek/倍速/缓冲、语音连接与重连/远端音频订阅/麦克风、耳机插拔、前后台与分屏、播放器错误与导出结果。心跳每 30 秒记录一次摘要，不逐条记录。`join` 保留事件但密码替换为 `***`，`voiceToken` 只记录长度；`send()` 的 `logcat` 输出也走同一脱敏路径。首页高级设置与成员抽屉各新增「导出诊断日志」，导出单个 `.txt`（含机型、系统、APK 版本、时间、昵称、房间码与服务器地址），通过 `FileProvider` 拉起系统分享面板，不申请存储权限。退出房间时语音与播放连接按既有行为断开，应用级日志继续记录。
+- 证据：`android/app/src/main/java/com/syncwatch/app/DiagnosticLog.kt`；`SyncEngine.kt`、`VoiceClient.kt`、`MainActivity.kt` 接入；`AndroidManifest.xml` 新增 `FileProvider`，`res/xml/file_paths.xml` 限定仅暴露 `cache/diagnostics-export/`；`activity_main.xml` 新增两个导出入口；最终 `assembleDebug testDebugUnitTest` 通过（`BUILD SUCCESSFUL in 15s`），产物 `android/app/build/outputs/apk/debug/app-debug.apk`，大小 63,890,714 字节，SHA256 `A7879B6C17CD1A20A22CDF2C83FC278FC3C536089AB12D971A82D2E043026C4D`；模拟器 `f04_test`（Android 16 / API 36）启动后生成 `files/diagnostics/diag-2026-11-17.log`，首页导出生成 `cache/diagnostics-export/syncwatch-diagnostics-20261117-074403.txt`（570 字节）并确认 `topResumedActivity` 为 `com.android.intentresolver/.ChooserActivityLauncher`；本机临时 WebSocket 服务实测日志含 `[send] join room=ABC123 name=Tester password=***` 与 `voiceTokenLen=21`，`logcat` 仅含 `tokenLen=21`，无 token 正文或密码。
+- 遗留：成员抽屉导出按钮、7 天清理与 2 MB 上限未在模拟器实测；真机双机使用后的日志转发未验证；release APK 因本机缺签名材料未构建。
+- 决策：日志仅本地保存、用户显式导出，不自动上传；文档 `docs/branches/android-voice/05-android-voice.md` 的「诊断日志」状态改为已实现。
