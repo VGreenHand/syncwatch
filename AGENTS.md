@@ -34,7 +34,7 @@ docs/adr/（永久决策）
 | 工作线 | v0.6 Android 内置语音；施工分支 `feat/android-voice`，发布基线 `main`。账本随分支走，只写当前 checkout 的副本 |
 | 账本 | `PROGRESS.md` |
 | 入口节 | `## 0. 会话入口`（约前 25 行） |
-| 流水节 | `### 12.N — 标题`；取最大号：`Select-String -Path PROGRESS.md -Pattern '^### 12\.'`（git bash：`grep '^### 12\.' PROGRESS.md`） |
+| 流水节 | `### 12.N — 标题`；列候选：`Select-String -Path PROGRESS.md -Pattern '^### 12\.'`（git bash：`grep '^### 12\.' PROGRESS.md`）。**取最大号须用小数点后的 N 按数值比较**，例如 `12.31` 大于 `12.9`；不得只取每行的第一个数字（那会得到 `12`，稳定误报滞后） |
 | 任务清单 | `§7 任务清单` 当前任务行 |
 | 任务文档路由 | 见本节下方「按任务取文档」表 |
 | 状态副本 | 无（README、docs 只放指针） |
