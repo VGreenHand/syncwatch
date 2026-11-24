@@ -248,7 +248,7 @@ docker compose version # 服务器上需要
 | `docs/08-Android客户端现代化UI实施.md` | Android UI 实施边界、阶段与验收矩阵 |
 | `docs/adr/0001-android-voice-chat.md` | 语音方案的全部决策与验收标准 |
 | `AGENTS.md` | 仓库级 agent 规则：红线、权威链、会话交接、代码变更纪律、验证约定 |
-| `CONTEXT.md` | 术语表：上游、fork、语音扩展 |
+| `GLOSSARY.md` | 术语表：上游、fork、语音扩展 |
 | `docs/branches/android-voice/README.md` | fork 语音扩展的范围、文档索引与上游关系 |
 | `docs/branches/android-voice/02-voice-protocol.md` | `hello` 的 `voiceUrl` / `voiceToken` 扩展 |
 | `docs/branches/android-voice/03-voice-deploy.md` | LiveKit 同机部署、端口、NAT 与排障 |
@@ -282,8 +282,8 @@ docker compose version # 服务器上需要
 
 - 类型：文档
 - 状态：✅ 已验收（维护者，2026-11-10）
-- 内容：新增 `CONTEXT.md` 术语表与 `docs/branches/android-voice/README.md`；语音文档只写 fork 目录；上游 `README.md`、`docs/01`、`docs/02`、`docs/03`、`docs/05` 原文不动；T5 改为补 fork 文档。
-- 证据：`CONTEXT.md`；`docs/branches/android-voice/README.md`；`PROGRESS.md` §0、§7、§11。
+- 内容：新增 `GLOSSARY.md` 术语表与 `docs/branches/android-voice/README.md`；语音文档只写 fork 目录；上游 `README.md`、`docs/01`、`docs/02`、`docs/03`、`docs/05` 原文不动；T5 改为补 fork 文档。
+- 证据：`GLOSSARY.md`；`docs/branches/android-voice/README.md`；`PROGRESS.md` §0、§7、§11。
 - 决策：PR 被上游接受前不回填上游文档。
 
 ### 12.4 — 2026-11-10 明确 hello 下发 voiceUrl 与 voiceToken
@@ -371,7 +371,7 @@ docker compose version # 服务器上需要
 - 类型：流程 / 设计收尾
 - 状态：✅ 已验收（维护者，2026-11-10）
 - 内容：开工前设计与文档口径已收尾；开发计划保存于 ADR、`docs/branches/android-voice/` 的 README/02/03/05 与 §7 任务表；T1–T5 未开始。
-- 证据：`git ls-files` 确认 ADR、`CONTEXT.md`、`docs/branches/android-voice/` 四份文档、`AGENTS.md`、`PROGRESS.md` 均已入库；工作区干净；本地领先 `fork/feat/android-voice`，未 push。
+- 证据：`git ls-files` 确认 ADR、`GLOSSARY.md`、`docs/branches/android-voice/` 四份文档、`AGENTS.md`、`PROGRESS.md` 均已入库；工作区干净；本地领先 `fork/feat/android-voice`，未 push。
 - 决策：下一步 T1；未编译、未上真机、未部署 LiveKit。
 
 ### 12.15 — 2026-11-10 按评审补齐语音计划执行口径
@@ -492,7 +492,7 @@ docker compose version # 服务器上需要
 
 - 类型：协作 / 交付
 - 状态：✅ 已完成（PR 审查与合并待上游维护者）
-- 内容：按维护者要求新建 `pr/android-voice`，以 `origin/main` 为基线，只取语音代码与必要文档；排除 `AGENTS.md`、`.agents/`、`PROGRESS.md`、`CONTEXT.md`。公开分支按文档、服务端、Android、LiveKit 部署拆为 4 个提交，并去掉公开文档中指向内部账本的两处引用。上游 `main` 期间前进到 `4e0ba3e`（Android release 正式签名），已合并进 PR 分支；语音权限仍只新增 `RECORD_AUDIO`，`singleTask` 保留。已向 `yangnicejin/syncwatch:main` 创建 Draft PR `#1`，head 为 `VGreenHand:pr/android-voice`。
+- 内容：按维护者要求新建 `pr/android-voice`，以 `origin/main` 为基线，只取语音代码与必要文档；排除 `AGENTS.md`、`.agents/`、`PROGRESS.md`、`GLOSSARY.md`。公开分支按文档、服务端、Android、LiveKit 部署拆为 4 个提交，并去掉公开文档中指向内部账本的两处引用。上游 `main` 期间前进到 `4e0ba3e`（Android release 正式签名），已合并进 PR 分支；语音权限仍只新增 `RECORD_AUDIO`，`singleTask` 保留。已向 `yangnicejin/syncwatch:main` 创建 Draft PR `#1`，head 为 `VGreenHand:pr/android-voice`。
 - 证据：PR `https://github.com/yangnicejin/syncwatch/pull/1`，`draft=true`；分支 `fork/pr/android-voice` 基于 `4e0ba3e`；`git grep` 确认公开分支无真实服务器地址；25 个公开文件、变更 `+1543/-34`；合并上游后临时目录 `assembleDebug` 构建成功（`BUILD SUCCESSFUL in 34s`）；此前 release 构建在本机因缺 `android/keystore.properties`/`android/keystore/syncwatch-release.jks` 未通过，属预期的不入库签名材料。
 - 遗留：T4 未验收项不变（两台 Android 真机、延迟、丢包、网络切换、soak）；本机 PATH 无 Go，服务端与 Windows/GUI 构建未复跑。
 - 决策：维护者 2026-11-16 同意先建 PR 版本，未验收部分不阻塞试用；PR 先保持 Draft，由上游维护者审查后合并；内部施工继续在 `feat/android-voice`，公开分支手动同步。地址隐藏采用「仓库只放 `.example` 模板、真实值留在 git-ignored 的 `android/local.properties` / `server/.env` / `server/deploy.env` / `voice/.env`」；Android 构建读取 `syncwatch.server`，服务端与 LiveKit 读取环境变量。另在本地补齐 `android/local.properties`（模板值），未改动真实服务器配置。维护者当天确认只有本机在推送，授权重写 `feat/android-voice` 历史；已把旧账本中的公网地址替换为 `<公网IP>`，备份分支 `backup/feat-android-voice-pre-scrub` 保留在本机，force-push 后远端历史扫描 0 命中。
