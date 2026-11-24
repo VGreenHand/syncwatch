@@ -25,14 +25,35 @@ docs/adr/（永久决策）
 - ADR 的 `Proposed` 不等于已批准；只有维护者能把状态改为 `Accepted`。
 - README、docs、任务说明提到当前状态时只放指针，不复制状态值。
 
-## 会话交接（skill `session-handover`）
+## 会话交接配置（skill `session-handover` / `ledger-rotation`）
 
-1. **接力先读入口**：checkout 工作线分支 → 读 `PROGRESS.md` §0 + §7 当前任务行 → 用 `Select-String -Path PROGRESS.md -Pattern '^### 12\.'` 比对最新流水；不通读全文、不读历史流水。
-2. **单写者**：只有当前分支的收尾方/维护者能写 `PROGRESS.md`；其他会话发现入口过期只报告。
-3. **收尾一次 commit**：追加 `### 12.N` 流水 → 刷 §0 入口 → 翻转 §7 任务状态行；实现方收尾置 `🔶 待验收`。
-4. **维护者验收**：补 `✅ 已验收 + 决策`，再刷 §0。
-5. **里程碑触发** `ledger-rotation`：阶段切换收尾时检查轮转（阈值：流水 > 40 条或 `PROGRESS.md` > 60 KB）；不在每次收尾检查。
-6. **多机纪律**：一条分支同一时间只在一台机器活跃；换机前 commit + push 并更新 §0「当前占用」；共享分支不 `push --force`。
+流程本身写在 `.agents/skills/session-handover/SKILL.md` 与 `.agents/skills/ledger-rotation/SKILL.md`，**这两份文件不含项目值，不要改动**。本节只放本仓库的值。
+
+| 配置键 | 本仓库的值 |
+| --- | --- |
+| 工作线 | v0.6 Android 内置语音；施工分支 `feat/android-voice`，发布基线 `main`。账本随分支走，只写当前 checkout 的副本 |
+| 账本 | `PROGRESS.md` |
+| 入口节 | `## 0. 会话入口`（约前 25 行） |
+| 流水节 | `### 12.N — 标题`；取最大号：`Select-String -Path PROGRESS.md -Pattern '^### 12\.'`（git bash：`grep '^### 12\.' PROGRESS.md`） |
+| 任务清单 | `§7 任务清单` 当前任务行 |
+| 任务文档路由 | 见本节下方「按任务取文档」表 |
+| 状态副本 | 无（README、docs 只放指针） |
+| 证据位置 | 流水条内写 commit / 构建产物 / 真机或服务器记录；本项目不另建证据目录 |
+| 状态机 | ⬜ 未开始 → 🚧 实现中 → ⏸ 阻塞(等待 X) → 🔶 待验收 → ✅ 已验收 |
+| 权威链 | 见上文「文档权威链」 |
+| 收尾提交 | 允许收尾提交；前缀 `feat(v0.6):` / `fix:` / `docs:` + 中文描述 |
+| 轮转 | 流水 > 40 条 或 `PROGRESS.md` > 60 KB；归档 `docs/archive/PROGRESS-<年季>.md`；保留最近 20 条 |
+| 附加纪律 | ① 多机：一条分支同一时间只在一台机器活跃，换机前 commit + push 并更新 §0「当前占用」，共享分支不 `push --force`。② ADR `Proposed` ≠ 已批准，只有维护者能改 `Accepted`。③ 未验证的结论必须标「未验证」。④ 未来新工作线在对应分支 `docs/branches/` 另立账本，不与语音线共用可写账本 |
+
+按任务取文档（读协议第 4 步用；只读当前任务那一行，不读整张表）：
+
+| 任务 | 开工前读 |
+| --- | --- |
+| T1 LiveKit 部署 | ADR §5/§7 + `docs/03-服务端部署.md` + `voice/` |
+| T2 服务器下发 token | ADR §4 + `docs/02-同步协议.md` + `server/main.go` |
+| T3 Android 接入 | ADR §6 + `docs/05-Android客户端.md` + `docs/07`/`08` + `android/` 相关源码 |
+| T4 双机联调 | ADR「验收标准」+ `docs/05` 的已知限制 |
+| T5 文档 | `docs/02`、`docs/05`、`README.md` 的对应章节 |
 
 ## 代码变更纪律（karpathy-guidelines）
 
